@@ -1,0 +1,16 @@
+{
+  "title": "ServerAdmin",
+  "type": "tool",
+  "tags": [
+    "build",
+    "roleplay"
+  ],
+  "ignore": [
+    "*.psd",
+    "*.blend",
+    "*.bak",
+    ".git/*",
+    ".github/*",
+    "README.md"
+  ]
+}
