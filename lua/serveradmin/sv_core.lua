@@ -217,7 +217,7 @@ local function normalizeJobSpec(raw)
     local spec = {}
     spec.name = jobClean(raw.name, 48)
     spec.command = string.lower(jobClean(raw.command, 32))
-    spec.description = jobClean(raw.description, 500)
+    spec.description = jobClean(raw.description, 320)
     spec.category = jobClean(raw.category, 48)
     spec.salary = tonumber(raw.salary)
     spec.max = tonumber(raw.max)
@@ -301,8 +301,7 @@ local function jobToDarkRP(spec)
         admin = spec.admin,
         vote = spec.vote,
         hasLicense = spec.hasLicense,
-        category = spec.category,
-        ServerAdminCustom = true
+        category = spec.category
     }
 end
 
