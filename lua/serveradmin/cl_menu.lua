@@ -870,16 +870,32 @@ local function buildPanel()
     local selectedBanID
     banList.OnRowSelected = function(_, _, line) selectedBanID = line.serveradminBanID end
     banList.Think = function(self)
-        local signature = ""
-        for _, b in ipairs(state.bans) do signature = signature .. "|" .. b.id .. ":" .. b.active .. ":" .. b.steamid .. ":" .. b.reason .. ":" .. b.expires end
+        local signatureParts = {}
+        for _, b in ipairs(state.bans) do
+            -- Guard UI rendering against unexpected Lua types in network data so one malformed
+            -- record cannot throw every frame and break the moderation page.
+            signatureParts[#signatureParts + 1] = table.concat({
+                tostring(b.id or ""), tostring(b.active == true), tostring(b.steamid or ""),
+                tostring(b.reason or ""), tostring(b.expires or 0)
+            }, ":")
+        end
+        local signature = table.concat(signatureParts, "|")
         if self.serveradminBansSignature == signature then return end
         self.serveradminBansSignature = signature
         self:Clear()
         for _, b in ipairs(state.bans) do
-            local active = b.active
-            local expires = not active and "—" or (b.expires == 0 and "Permanent" or os.date("%Y-%m-%d %H:%M", b.expires))
-            local line = self:AddLine(active and "ACTIVE" or "Expired", b.name, b.steamid, b.reason, b.actor, expires)
-            line.serveradminBanID = b.id
+            local active = b.active == true
+            local rawExpires = tonumber(b.expires) or 0
+            local expires = not active and "—" or (rawExpires == 0 and "Permanent" or os.date("%Y-%m-%d %H:%M", rawExpires))
+            local line = self:AddLine(
+                active and "ACTIVE" or "Expired",
+                tostring(b.name or "Unknown"),
+                tostring(b.steamid or "Unknown"),
+                tostring(b.reason or "No reason recorded"),
+                tostring(b.actor or "Unknown"),
+                expires
+            )
+            line.serveradminBanID = tonumber(b.id) or 0
         end
     end
     local banButtons = vgui.Create("DPanel", bansTab)
