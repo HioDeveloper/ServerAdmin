@@ -264,10 +264,14 @@ local function buildPanel()
     online.Think = function(self)
         if self.serveradminRefresh and self.serveradminRefresh > CurTime() then return end
         self.serveradminRefresh = CurTime() + 2
-        if #self:GetLines() ~= #state.players then
-            self:Clear()
-            for _, p in ipairs(state.players) do self:AddLine(p.name, p.team, "$" .. string.Comma(p.money or 0), p.ping) end
+        local signature = tostring(#state.players)
+        for _, p in ipairs(state.players) do
+            signature = signature .. "|" .. tostring(p.userid) .. ":" .. tostring(p.name) .. ":" .. tostring(p.team) .. ":" .. tostring(p.money) .. ":" .. tostring(p.ping)
         end
+        if self.serveradminSignature == signature then return end
+        self.serveradminSignature = signature
+        self:Clear()
+        for _, p in ipairs(state.players) do self:AddLine(p.name, p.team, "$" .. string.Comma(p.money or 0), p.ping) end
     end
     local refresh = button(overview, "Refresh data", C.blue, function() request("refresh") end)
     refresh:Dock(BOTTOM); refresh:DockMargin(0, 10, 0, 0); refresh:SetWide(140)
@@ -356,6 +360,7 @@ local function buildPanel()
     rpNotice.Think = function(self)
         self:SetText(state.darkrp and ("DarkRP detected • " .. #state.jobs .. " registered jobs") or "DarkRP was not detected. Generic server controls remain available.")
     end
+    local selectedJob
     local jobList = vgui.Create("DListView", darkrpPage)
     jobList:Dock(FILL); jobList:DockMargin(0, 8, 0, 8)
     jobList:AddColumn("Job"):SetFixedWidth(240)
@@ -363,7 +368,6 @@ local function buildPanel()
     jobList:AddColumn("Salary")
     jobList:SetDataHeight(25)
     jobList.Paint = function(self, w, h) rounded(0, 0, w, h, C.bg, 7) end
-    local selectedJob
     jobList.OnRowSelected = function(_, _, line) selectedJob = line.serveradminJobID end
     jobList.Think = function(self)
         if self.serveradminJobsVersion == #state.jobs then return end
@@ -401,8 +405,10 @@ local function buildPanel()
     logList:SetDataHeight(25)
     logList.Paint = function(self, w, h) rounded(0, 0, w, h, C.bg, 7) end
     logList.Think = function(self)
-        if self.serveradminLogCount == #state.logs then return end
-        self.serveradminLogCount = #state.logs
+        local first = state.logs[1]
+        local signature = tostring(#state.logs) .. ":" .. tostring(first and first.time) .. ":" .. tostring(first and first.action) .. ":" .. tostring(first and first.detail)
+        if self.serveradminLogSignature == signature then return end
+        self.serveradminLogSignature = signature
         self:Clear()
         for _, item in ipairs(state.logs) do self:AddLine(item.time, item.actor, item.action, item.target, item.detail) end
     end
