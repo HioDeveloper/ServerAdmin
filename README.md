@@ -28,6 +28,10 @@ ServerAdmin is a full-screen, in-game administration centre for Garry's Mod. It 
 - Bring, teleport to player, freeze/unfreeze, heal, respawn and slay.
 - Voice mute/unmute, chat gag/ungag, god mode, strip weapons, ignite/extinguish, set health and set armour.
 - DarkRP wallet set/adjust and registered job switching.
+- Create custom DarkRP professions from the in-game editor: name, chat command, description, player models, weapon loadout, F4 category, salary, player limit, access level, voting, license requirement and RGB color.
+- Edit ServerAdmin-created professions; their settings are stored in `data/serveradmin/custom_jobs.json` and restored after DarkRP finishes loading.
+- Custom profession definitions are synchronized to connected clients and reflected in the local DarkRP job registry/F4 categories.
+- Profession chat commands remain fixed after creation because DarkRP maintains an internal command registry. Default jobs from DarkRP or other addons are not edited in-place to avoid overwriting third-party configuration.
 
 ### Server controls
 - Set hostname, gravity and change map.
@@ -47,7 +51,7 @@ ServerAdmin is a full-screen, in-game administration centre for Garry's Mod. It 
 ## Permissions and safety
 
 - Only players recognised by Garry's Mod as administrators can use the panel.
-- Server configuration, map changes, economy/job changes, unbans, bot management, announcements, cleanup, lockdown and health/armour overrides require superadmin.
+- Server configuration, map changes, economy/job changes, custom profession creation/editing, unbans, bot management, announcements, cleanup, lockdown and health/armour overrides require superadmin.
 - Every action is permission-checked again on the server; hiding a button in the client is never considered access control.
 - A regular admin cannot target a superadmin. Several high-impact actions against administrators are restricted to superadmins.
 - Variable updates use a strict allow-list and validated values; the client cannot submit arbitrary commands.
