@@ -1,64 +1,61 @@
 # ServerAdmin
 
-A fullscreen, dark administration control center for Garry's Mod, with optional DarkRP-aware job and wallet tools.
+ServerAdmin is a full-screen, in-game administration centre for Garry's Mod. It uses native Derma UI and server-authoritative networking; it is not a remote web panel and it does not require ULX.
 
 ## Installation
 
-1. Download or clone this repository into `garrysmod/addons/ServerAdmin`.
-2. Restart the server or change map.
-3. Join with an administrator account.
-4. Open the panel with **F6** or run `serveradmin` in the console.
+1. Download or clone this repository into the garrysmod/addons/ServerAdmin directory.
+2. Restart the server or change map so the server and clients load the updated Lua files.
+3. Connect with a Garry's Mod administrator account.
+4. Open the panel using **F6** or run **serveradmin** in the client console.
 
-The addon uses the Garry's Mod Derma UI and server-authoritative net messages. It is an in-game panel, not a remote web panel.
+## Functionality
 
-## Current features
-
-### Dashboard
-- Fullscreen interface with sidebar navigation
-- Live hostname, map, player count and player table
-- Tickrate estimate, server uptime and Lua memory estimate
-- Current gravity and gamemode status
+### Dashboard and diagnostics
+- Server hostname, current map, gamemode and DarkRP detection.
+- Live connected-player overview and player-slot count.
+- Estimated tickrate, Lua memory, module uptime, bot count and entity count.
+- Build-lockdown status and latest ServerAdmin audit entries.
+- Refreshable server snapshot; metrics that the normal GMod Lua API does not expose are not fabricated.
 
 ### Player management
-- Search by name, SteamID, team/job and rank
-- Player role, ping, health, armor, alive state and DarkRP wallet
-- Kick with reason
-- Timed/permanent ban with reason
-- Warnings
-- Freeze and unfreeze
-- Bring and goto
-- Heal, respawn and slay
-- Set wallet balance and adjust wallet balance (DarkRP + superadmin)
-- Change player job (DarkRP + superadmin)
+- Search by player name, SteamID, SteamID64, job/team and admin rank.
+- Player listing with job, wallet balance, ping, SteamID and rank.
+- Kick with a reason.
+- Timed and permanent bans with a reason.
+- Persistent ban records and a selected-record unban action.
+- Persistent warning history and in-game warning messages.
+- Bring, teleport to player, freeze/unfreeze, heal, respawn and slay.
+- Voice mute/unmute, chat gag/ungag, god mode, strip weapons, ignite/extinguish, set health and set armour.
+- DarkRP wallet set/adjust and registered job switching.
 
-### Server settings
-- Change hostname
-- Change gravity
-- Change map after confirming the action
-- Server-side validation and superadmin checks
+### Server controls
+- Set hostname, gravity and change map.
+- Create up to ten bots per request, remove all bots, and kick individual bots from the player list.
+- Broadcast an announcement to all players.
+- Clean up map entities, with a confirmation prompt.
+- Enable/disable build lockdown for non-admin players.
+- Edit a fixed allow-list of server variables: gravity, password, voice/all-talk, LAN/friendly-fire flags, Sandbox permissions and common Sandbox entity limits.
+- Secret values (such as sv_password) are never sent back to the client. The password editor starts blank; a blank value clears the password.
 
-### Audit and diagnostics
-- SQLite-backed audit log for ServerAdmin actions
-- Recent log viewer
-- Runtime information, estimated tickrate, uptime and Lua memory estimate
+### Audit and persistence
+- SQLite tables store ServerAdmin actions, bans and warnings.
+- The audit log records the administrator, action, target and details.
+- Timed ServerAdmin ban records are marked expired when their expiry time has passed.
+- The add-on does not provide group/role management or arbitrary RCON/console-command execution.
 
 ## Permissions and safety
 
-- Only players recognized by Garry's Mod as admins can open/use the panel.
-- Sensitive settings, map changes, wallet changes and job changes require superadmin.
-- All actions are validated on the server; client UI visibility is not treated as permission.
-- A regular admin cannot target a superadmin. Some actions against other admins are restricted to superadmins.
-- Map changes require a matching map file to exist on the server.
-- Audit entries are stored in the server's SQLite database.
+- Only players recognised by Garry's Mod as administrators can use the panel.
+- Server configuration, map changes, economy/job changes, unbans, bot management, announcements, cleanup, lockdown and health/armour overrides require superadmin.
+- Every action is permission-checked again on the server; hiding a button in the client is never considered access control.
+- A regular admin cannot target a superadmin. Several high-impact actions against administrators are restricted to superadmins.
+- Variable updates use a strict allow-list and validated values; the client cannot submit arbitrary commands.
+- Map names are validated and the requested .bsp file must exist on the server.
+- Build lockdown blocks common Sandbox spawn hooks for non-admins. Gamemodes and other addons that replace those hooks may require compatibility testing.
 
-## DarkRP compatibility
+## Compatibility and testing
 
-DarkRP-specific controls are shown when DarkRP job data and player wallet functions are available. The addon reads registered jobs from `RPExtraTeams`; it does not attempt to rewrite DarkRP configuration files or override unrelated addons.
+The add-on uses standard Garry's Mod APIs and optional DarkRP APIs. DarkRP job switching depends on the server's actual DarkRP configuration and other installed addons. ServerAdmin ban history tracks bans created through this panel; bans created outside ServerAdmin may not appear in its history.
 
-## Metrics note
-
-Garry's Mod does not expose every operating-system metric through ordinary addon Lua. The dashboard labels the tickrate and Lua memory values as estimates; it does not fabricate CPU or system RAM readings.
-
-## Testing recommendation
-
-Test on a private server first, especially the moderation actions and DarkRP job changes. Other server addons can alter job-switching rules or moderation behavior.
+**Test on a private server before using it in production.** In particular, verify ban/unban persistence, DarkRP job switching, server-variable availability, voice mute behaviour and interactions with other moderation or Sandbox addons. I can update the code directly, but cannot claim in-game validation without running a Garry's Mod server.
