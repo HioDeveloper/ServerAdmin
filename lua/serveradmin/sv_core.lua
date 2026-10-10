@@ -732,7 +732,7 @@ end
 local function sendMOTD(ply, messageKind)
     if not IsValid(ply) then return end
     local motd = readMOTD()
-    if motd.body == "" then return end
+    if motd.body == "" and (messageKind or "motd_show") == "motd_show" then return end
     net.Start(NET)
         net.WriteString(messageKind or "motd_show")
         net.WriteString(motd.title)
