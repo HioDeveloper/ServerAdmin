@@ -78,6 +78,44 @@ local function ensureTables()
         actor TEXT NOT NULL,
         created INTEGER NOT NULL
     )]])
+
+    -- Existing servers may already have an older version of these tables. CREATE TABLE IF NOT
+    -- EXISTS does not add columns, so migrate missing columns before moderation queries run.
+    local function ensureColumn(tableName, columnName, definition)
+        local columns = sql.Query("PRAGMA table_info(" .. tableName .. ")")
+        if not istable(columns) then
+            ErrorNoHalt("[ServerAdmin] Could not inspect SQLite table " .. tableName .. ": " .. tostring(sql.LastError()) .. "\\n")
+            return
+        end
+        for _, column in ipairs(columns) do
+            if column.name == columnName then return end
+        end
+        local result = sql.Query("ALTER TABLE " .. tableName .. " ADD COLUMN " .. columnName .. " " .. definition)
+        if result == false then
+            ErrorNoHalt("[ServerAdmin] Could not migrate SQLite column " .. tableName .. "." .. columnName .. ": " .. tostring(sql.LastError()) .. "\\n")
+        end
+    end
+
+    local banColumns = {
+        {"steamid", "TEXT NOT NULL DEFAULT ''"},
+        {"steamid64", "TEXT NOT NULL DEFAULT ''"},
+        {"name", "TEXT NOT NULL DEFAULT 'Unknown'"},
+        {"reason", "TEXT NOT NULL DEFAULT ''"},
+        {"actor", "TEXT NOT NULL DEFAULT 'Unknown'"},
+        {"created", "INTEGER NOT NULL DEFAULT 0"},
+        {"expires", "INTEGER NOT NULL DEFAULT 0"},
+        {"active", "INTEGER NOT NULL DEFAULT 1"}
+    }
+    for _, column in ipairs(banColumns) do ensureColumn("serveradmin_bans", column[1], column[2]) end
+
+    local warningColumns = {
+        {"steamid", "TEXT NOT NULL DEFAULT ''"},
+        {"name", "TEXT NOT NULL DEFAULT 'Unknown'"},
+        {"reason", "TEXT NOT NULL DEFAULT ''"},
+        {"actor", "TEXT NOT NULL DEFAULT 'Unknown'"},
+        {"created", "INTEGER NOT NULL DEFAULT 0"}
+    }
+    for _, column in ipairs(warningColumns) do ensureColumn("serveradmin_warnings", column[1], column[2]) end
 end
 ensureTables()
 
@@ -145,12 +183,17 @@ end
 local function insertBan(target, reason, minutes, actor)
     local now = os.time()
     local expires = minutes > 0 and (now + minutes * 60) or 0
-    sql.Query("INSERT INTO serveradmin_bans (steamid, steamid64, name, reason, actor, created, expires, active) VALUES (" ..
+    local result = sql.Query("INSERT INTO serveradmin_bans (steamid, steamid64, name, reason, actor, created, expires, active) VALUES (" ..
         sql.SQLStr(cleanText(target:SteamID(), 32)) .. ", " ..
         sql.SQLStr(cleanText(target:SteamID64(), 32)) .. ", " ..
         sql.SQLStr(cleanText(target:Nick(), 64)) .. ", " ..
         sql.SQLStr(cleanText(reason, MAX_REASON)) .. ", " ..
         sql.SQLStr(cleanText(actor, 90)) .. ", " .. tostring(now) .. ", " .. tostring(expires) .. ", 1)")
+    if result == false then
+        ErrorNoHalt("[ServerAdmin] Failed to save ban record for " .. cleanText(target:SteamID(), 32) .. ": " .. tostring(sql.LastError()) .. "\\n")
+        return false, tostring(sql.LastError())
+    end
+    return true
 end
 
 local function insertWarning(target, reason, actor)
@@ -1131,10 +1174,18 @@ local function runAction(ply, action)
                 return
             end
             if reason == "" then reason = "Banned by an administrator" end
-            insertBan(target, reason, minutes, actorName(ply))
+            local saved, saveError = insertBan(target, reason, minutes, actorName(ply))
+            if not saved then
+                sendNotice(ply, false, "Ban could not be recorded in ServerAdmin history. Check the server console.")
+                ErrorNoHalt("[ServerAdmin] Ban was applied without a history record: " .. tostring(saveError) .. "\\n")
+            end
             audit(ply, "ban", target, (minutes == 0 and "Permanent" or (tostring(minutes) .. " minutes")) .. "; " .. reason)
             target:Ban(minutes, true)
             sendNotice(ply, true, minutes == 0 and "Player permanently banned." or "Player banned.")
+            -- Push the updated moderation history immediately; do not require reopening the tab.
+            timer.Simple(0, function()
+                if IsValid(ply) then sendSnapshot(ply) end
+            end)
         elseif action == "warn" then
             local reason = cleanText(net.ReadString(), MAX_REASON)
             if reason == "" then reason = "Please follow the server rules." end
