@@ -1031,40 +1031,36 @@ local function applyClientCustomJobs(specs, attempt)
         if id and id > 0 and id < 65536 and isstring(spec.command) and istable(spec.models) and istable(spec.weapons) then
             state.customJobs[id] = spec
             local current = RPExtraTeams[id]
-            local compatible = not current or current.ServerAdminCustom == true or
-                string.lower(tostring(current.command or "")) == string.lower(spec.command)
-            if compatible then
-                if current and current.ServerAdminCustom and DarkRP and isfunction(DarkRP.removeFromCategory) then
-                    pcall(DarkRP.removeFromCategory, current, "jobs")
-                end
+            -- Team IDs are assigned by the server. If a client has a different local registration
+            -- order, its entry at this ID must still reflect the server's actual profession.
+            if current and DarkRP and isfunction(DarkRP.removeFromCategory) then
+                pcall(DarkRP.removeFromCategory, current, "jobs")
+            end
 
-                current = current or {}
-                current.name = tostring(spec.name or "Custom profession")
-                current.command = tostring(spec.command or "")
-                current.description = tostring(spec.description or "")
-                current.model = table.Copy(spec.models)
-                current.weapons = table.Copy(spec.weapons)
-                current.category = tostring(spec.category or "Custom")
-                current.salary = tonumber(spec.salary) or 0
-                current.max = tonumber(spec.max) or 0
-                current.admin = tonumber(spec.admin) or 0
-                current.vote = spec.vote == true
-                current.hasLicense = spec.hasLicense == true
-                current.color = Color(
-                    math.Clamp(tonumber(spec.r) or 40, 0, 255),
-                    math.Clamp(tonumber(spec.g) or 150, 0, 255),
-                    math.Clamp(tonumber(spec.b) or 220, 0, 255),
-                    255
-                )
-                current.ServerAdminCustom = true
-                RPExtraTeams[id] = current
+            current = current or {}
+            current.name = tostring(spec.name or "Custom profession")
+            current.command = tostring(spec.command or "")
+            current.description = tostring(spec.description or "")
+            current.model = table.Copy(spec.models)
+            current.weapons = table.Copy(spec.weapons)
+            current.category = tostring(spec.category or "Custom")
+            current.salary = tonumber(spec.salary) or 0
+            current.max = tonumber(spec.max) or 0
+            current.admin = tonumber(spec.admin) or 0
+            current.vote = spec.vote == true
+            current.hasLicense = spec.hasLicense == true
+            current.color = Color(
+                math.Clamp(tonumber(spec.r) or 40, 0, 255),
+                math.Clamp(tonumber(spec.g) or 150, 0, 255),
+                math.Clamp(tonumber(spec.b) or 220, 0, 255),
+                255
+            )
+            current.ServerAdminCustom = true
+            RPExtraTeams[id] = current
 
-                if team and team.SetUp then team.SetUp(id, current.name, current.color) end
-                if DarkRP and isfunction(DarkRP.addToCategory) then
-                    pcall(DarkRP.addToCategory, current, "jobs", current.category)
-                end
-            else
-                ErrorNoHalt("[ServerAdmin] Custom profession sync skipped due to team ID mismatch at " .. tostring(id) .. ". Check that DarkRP job registration order matches between server and client.\n")
+            if team and team.SetUp then team.SetUp(id, current.name, current.color) end
+            if DarkRP and isfunction(DarkRP.addToCategory) then
+                pcall(DarkRP.addToCategory, current, "jobs", current.category)
             end
         end
     end
