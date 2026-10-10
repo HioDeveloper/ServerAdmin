@@ -1,6 +1,6 @@
 -- ServerAdmin loader
 ServerAdmin = ServerAdmin or {}
-ServerAdmin.Version = "2.0.0"
+ServerAdmin.Version = "3.0.0"
 
 if SERVER then
     AddCSLuaFile("serveradmin/cl_menu.lua")
