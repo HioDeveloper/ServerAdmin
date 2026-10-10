@@ -1019,55 +1019,78 @@ end
 local function applyClientCustomJobs(specs, attempt)
     attempt = attempt or 0
     if not istable(specs) then return end
-    if not istable(RPExtraTeams) then
-        if attempt < 12 then timer.Simple(1, function() applyClientCustomJobs(specs, attempt + 1) end) end
+    if not istable(RPExtraTeams) or not istable(DarkRP) or not isfunction(DarkRP.createJob) then
+        if attempt < 20 then
+            timer.Simple(1, function() applyClientCustomJobs(specs, attempt + 1) end)
+        end
         return
     end
 
     state.customJobs = {}
     table.sort(specs, function(a, b) return (tonumber(a.id) or 0) < (tonumber(b.id) or 0) end)
+
     for _, spec in ipairs(specs) do
         local id = tonumber(spec.id)
         if id and id > 0 and id < 65536 and isstring(spec.command) and istable(spec.models) and istable(spec.weapons) then
             state.customJobs[id] = spec
+
             local current = RPExtraTeams[id]
-            -- Team IDs are assigned by the server. If a client has a different local registration
-            -- order, its entry at this ID must still reflect the server's actual profession.
-            if current and DarkRP and isfunction(DarkRP.removeFromCategory) then
-                pcall(DarkRP.removeFromCategory, current, "jobs")
-            end
+            if current and tostring(current.command or "") == tostring(spec.command) then
+                -- The job already exists locally; never rewrite a registered DarkRP team.
+                current.ServerAdminCustom = true
+            elseif current then
+                -- Another job occupies this ID on this client. Do not overwrite DarkRP's registry.
+                ErrorNoHalt("[ServerAdmin] Skipped client registration for '" ..
+                    tostring(spec.name or spec.command) .. "': team ID " .. tostring(id) ..
+                    " is occupied by '" .. tostring(current.name or current.command or "unknown") .. "'.\n")
+            elseif #RPExtraTeams + 1 ~= id then
+                -- DarkRP assigns sequential team IDs. Register only when this client's next ID
+                -- matches the server ID, otherwise the F4 menu could map the wrong profession.
+                ErrorNoHalt("[ServerAdmin] Skipped client registration for '" ..
+                    tostring(spec.name or spec.command) .. "': local team order does not match server ID " ..
+                    tostring(id) .. ".\n")
+            else
+                local categories
+                if isfunction(DarkRP.getCategories) then
+                    local ok, result = pcall(DarkRP.getCategories)
+                    if ok and istable(result) then categories = result.jobs end
+                end
+                local categoryExists = false
+                for _, entry in ipairs(istable(categories) and categories or {}) do
+                    if istable(entry) and tostring(entry.name or "") == tostring(spec.category or "") then
+                        categoryExists = true
+                        break
+                    end
+                end
 
-            current = current or {}
-            current.name = tostring(spec.name or "Custom profession")
-            current.command = tostring(spec.command or "")
-            current.description = tostring(spec.description or "")
-            current.model = table.Copy(spec.models)
-            current.weapons = table.Copy(spec.weapons)
-            current.category = tostring(spec.category or "Custom")
-            current.salary = tonumber(spec.salary) or 0
-            current.max = tonumber(spec.max) or 0
-            current.admin = tonumber(spec.admin) or 0
-            current.vote = spec.vote == true
-            current.hasLicense = spec.hasLicense == true
-            current.color = Color(
-                math.Clamp(tonumber(spec.r) or 40, 0, 255),
-                math.Clamp(tonumber(spec.g) or 150, 0, 255),
-                math.Clamp(tonumber(spec.b) or 220, 0, 255),
-                255
-            )
-            current.ServerAdminCustom = true
-            RPExtraTeams[id] = current
+                local jobData = {
+                    color = Color(
+                        math.Clamp(tonumber(spec.r) or 40, 0, 255),
+                        math.Clamp(tonumber(spec.g) or 150, 0, 255),
+                        math.Clamp(tonumber(spec.b) or 220, 0, 255),
+                        255
+                    ),
+                    model = table.Copy(spec.models),
+                    description = tostring(spec.description or ""),
+                    weapons = table.Copy(spec.weapons),
+                    command = tostring(spec.command or ""),
+                    max = tonumber(spec.max) or 0,
+                    salary = tonumber(spec.salary) or 0,
+                    admin = tonumber(spec.admin) or 0,
+                    vote = spec.vote == true,
+                    hasLicense = spec.hasLicense == true,
+                    category = categoryExists and tostring(spec.category) or "Other"
+                }
 
-            if team and team.SetUp then team.SetUp(id, current.name, current.color) end
-            if DarkRP and isfunction(DarkRP.addToCategory) then
-                pcall(DarkRP.addToCategory, current, "jobs", current.category)
+                local ok, createdID = pcall(DarkRP.createJob, tostring(spec.name or "Custom profession"), jobData)
+                if ok and tonumber(createdID) == id and istable(RPExtraTeams[id]) then
+                    RPExtraTeams[id].ServerAdminCustom = true
+                else
+                    ErrorNoHalt("[ServerAdmin] Could not safely register client profession '" ..
+                        tostring(spec.name or spec.command) .. "': " .. tostring(createdID) .. "\n")
+                end
             end
         end
-    end
-
-    if DarkRP and isfunction(DarkRP.getF4MenuPanel) then
-        local ok, panel = pcall(DarkRP.getF4MenuPanel)
-        if ok and IsValid(panel) then panel:Remove() end
     end
 end
 
