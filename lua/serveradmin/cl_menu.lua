@@ -292,8 +292,12 @@ local function openJobEditor(mode, jobData)
     accessEntry:SetTextColor(C.text)
     accessEntry.Paint = function(self, w, h)
         draw.RoundedBox(6, 0, 0, w, h, C.panel2)
-        surface.SetDrawColor(C.border); surface.DrawOutlinedRect(0, 0, w, h, 1)
-        self:DrawTextEntryText(C.text, C.blue, C.text)
+        surface.SetDrawColor(self:IsHovered() and C.blue or C.border)
+        surface.DrawOutlinedRect(0, 0, w, h, 1)
+        draw.SimpleText(self:GetValue() or "Everyone", "DermaDefault", 10, h / 2,
+            C.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+        draw.SimpleText("▼", "DermaDefaultBold", w - 18, h / 2,
+            C.muted, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
     end
 
     local switches = vgui.Create("DPanel", body)
@@ -749,12 +753,14 @@ local function buildPanel()
     end
 
     local createJobButton = button(jobActions, "Create profession", C.green, function()
+        if not LocalPlayer():IsSuperAdmin() then notify("Only superadmins can create professions.", false) return end
         if not state.darkrp then notify("DarkRP is not available.", false) return end
         openJobEditor("create")
     end, 36)
     createJobButton:SetPos(0, 8); createJobButton:SetSize(160, 36)
 
     local editJobButton = button(jobActions, "Edit selected", C.blue, function()
+        if not LocalPlayer():IsSuperAdmin() then notify("Only superadmins can edit professions.", false) return end
         if not selectedJob then notify("Select a profession first.", false) return end
         local custom = state.customJobs[selectedJob]
         if not custom then
