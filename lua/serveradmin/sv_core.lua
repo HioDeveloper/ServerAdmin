@@ -174,8 +174,12 @@ local function getMoney(target)
 end
 
 local function isDarkRP()
-    return DarkRP ~= nil or (GAMEMODE and GAMEMODE.Name and
-        string.find(string.lower(GAMEMODE.Name), "darkrp", 1, true) ~= nil)
+    return istable(DarkRP) or (GAMEMODE and GAMEMODE.Name and
+        string.find(string.lower(tostring(GAMEMODE.Name)), "darkrp", 1, true) ~= nil)
+end
+
+local function hasDarkRPJobAPI()
+    return istable(DarkRP) and isfunction(DarkRP.createJob) and istable(RPExtraTeams)
 end
 
 local CUSTOM_JOBS_FILE = "serveradmin/custom_jobs.json"
@@ -238,7 +242,9 @@ local function normalizeJobSpec(raw)
     if not spec.max or spec.max ~= spec.max or spec.max < 0 or spec.max > 255 then
         return nil, "Player limit must be between 0 and 255 (0 means unlimited)."
     end
-    if not spec.admin or spec.admin < 0 or spec.admin > 2 then return nil, "Invalid access level." end
+    if not spec.admin or spec.admin ~= spec.admin or spec.admin < 0 or spec.admin > 2 then
+        return nil, "Access level must be Everyone (0), Admin (1), or Superadmin (2)."
+    end
     if not spec.r or not spec.g or not spec.b then return nil, "Choose a profession color." end
     for _, channel in ipairs({spec.r, spec.g, spec.b}) do
         if channel ~= channel or channel < 0 or channel > 255 then return nil, "Color channels must be between 0 and 255." end
@@ -247,7 +253,15 @@ local function normalizeJobSpec(raw)
     spec.r, spec.g, spec.b = math.floor(spec.r), math.floor(spec.g), math.floor(spec.b)
 
     local modelsRaw = raw.modelText
-    if not isstring(modelsRaw) and istable(raw.models) then modelsRaw = table.concat(raw.models, ",") end
+    if not isstring(modelsRaw) and istable(raw.models) then
+        local modelParts = {}
+        for _, model in ipairs(raw.models) do
+            if not isstring(model) then return nil, "Every player model must be a string path." end
+            modelParts[#modelParts + 1] = model
+        end
+        modelsRaw = table.concat(modelParts, ",")
+    end
+    if not isstring(modelsRaw) then modelsRaw = "" end
     spec.models = splitJobList(modelsRaw, 4, 128, "^models/[%w_/%-%.]+%.mdl$")
     if not spec.models then return nil, "Model list is invalid or contains more than 4 models." end
     if #spec.models == 0 then return nil, "Add at least one model path." end
@@ -258,7 +272,15 @@ local function normalizeJobSpec(raw)
     end
 
     local weaponsRaw = raw.weaponsText
-    if not isstring(weaponsRaw) and istable(raw.weapons) then weaponsRaw = table.concat(raw.weapons, ",") end
+    if not isstring(weaponsRaw) and istable(raw.weapons) then
+        local weaponParts = {}
+        for _, weapon in ipairs(raw.weapons) do
+            if not isstring(weapon) then return nil, "Every weapon class must be a string." end
+            weaponParts[#weaponParts + 1] = weapon
+        end
+        weaponsRaw = table.concat(weaponParts, ",")
+    end
+    if not isstring(weaponsRaw) then weaponsRaw = "" end
     spec.weapons = splitJobList(weaponsRaw, 8, 48, "^[%w_%-]+$")
     if not spec.weapons then return nil, "Weapon list is invalid or contains more than 8 weapon classes." end
 
@@ -303,6 +325,40 @@ local function jobToDarkRP(spec)
         hasLicense = spec.hasLicense,
         category = spec.category
     }
+end
+
+-- DarkRP versions and third-party hooks can behave differently when jobs are added at runtime.
+-- Treat the resulting RPExtraTeams entry as authoritative instead of relying only on the return value.
+local function registerDarkRPJob(spec)
+    if not hasDarkRPJobAPI() then
+        return nil, "DarkRP job API is not ready."
+    end
+
+    local ok, returnedID = pcall(DarkRP.createJob, spec.name, jobToDarkRP(spec))
+    local jobID = tonumber(returnedID)
+
+    if not jobID or not istable(RPExtraTeams[jobID]) then
+        local matchedID = findJobByCommand(spec.command)
+        if matchedID and istable(RPExtraTeams[matchedID]) then
+            jobID = matchedID
+        end
+    end
+
+    if not jobID or not istable(RPExtraTeams[jobID]) then
+        local detail = ok and "DarkRP.createJob returned no registered profession." or tostring(returnedID)
+        return nil, jobClean(detail, 180)
+    end
+
+    local registered = RPExtraTeams[jobID]
+    if string.lower(tostring(registered.command or "")) ~= string.lower(spec.command) then
+        return nil, "DarkRP returned a team ID that does not match the requested command."
+    end
+
+    registered.ServerAdminCustom = true
+    for _, modelPath in ipairs(spec.models) do
+        pcall(util.PrecacheModel, modelPath)
+    end
+    return jobID
 end
 
 local function sendCustomJobSync(recipient)
@@ -353,8 +409,8 @@ local function applyEditedJob(jobID, spec)
 end
 
 local function loadStoredCustomJobs()
-    if ServerAdmin.CustomJobsLoaded or not isDarkRP() or not isfunction(DarkRP.createJob) or
-        not istable(RPExtraTeams) or #RPExtraTeams < 1 or DarkRP.DARKRP_LOADING then return end
+    if ServerAdmin.CustomJobsLoaded or not isDarkRP() or not hasDarkRPJobAPI() or
+        #RPExtraTeams < 1 or DarkRP.DARKRP_LOADING then return end
 
     ServerAdmin.CustomJobsLoaded = true
     local payload = file.Read(CUSTOM_JOBS_FILE, "DATA")
@@ -373,12 +429,11 @@ local function loadStoredCustomJobs()
             -- command. Never rewrite the file just because one command is temporarily occupied.
             ServerAdmin.StoredCustomJobs[#ServerAdmin.StoredCustomJobs + 1] = spec
             if not findJobByCommand(spec.command) then
-                local ok, id = pcall(DarkRP.createJob, spec.name, jobToDarkRP(spec))
-                if ok and isnumber(id) and istable(RPExtraTeams[id]) then
-                    RPExtraTeams[id].ServerAdminCustom = true
+                local id, registerError = registerDarkRPJob(spec)
+                if id then
                     ServerAdmin.CustomJobs[id] = spec
                 else
-                    ErrorNoHalt("[ServerAdmin] Could not load saved profession '" .. spec.name .. "': " .. jobClean(id, 160) .. "\n")
+                    ErrorNoHalt("[ServerAdmin] Could not load saved profession '" .. spec.name .. "': " .. jobClean(registerError, 160) .. "\n")
                 end
             else
                 ErrorNoHalt("[ServerAdmin] Skipped saved profession '" .. spec.name .. "' because command '/" .. spec.command .. "' is already registered.\n")
@@ -393,7 +448,7 @@ end
 hook.Add("DarkRPFinishedLoading", "ServerAdmin_LoadCustomJobs", loadStoredCustomJobs)
 timer.Create("ServerAdmin_WaitForDarkRPJobs", 1, 90, function()
     if ServerAdmin.CustomJobsLoaded then timer.Remove("ServerAdmin_WaitForDarkRPJobs") return end
-    if isDarkRP() and isfunction(DarkRP.createJob) and istable(RPExtraTeams) and #RPExtraTeams > 0 and not DarkRP.DARKRP_LOADING then
+    if isDarkRP() and hasDarkRPJobAPI() and #RPExtraTeams > 0 and not DarkRP.DARKRP_LOADING then
         loadStoredCustomJobs()
         if ServerAdmin.CustomJobsLoaded then timer.Remove("ServerAdmin_WaitForDarkRPJobs") end
     end
@@ -604,7 +659,7 @@ local function runAction(ply, action)
     end
 
     if action == "job_create" or action == "job_edit" then
-        if not isDarkRP() or not isfunction(DarkRP.createJob) or not istable(RPExtraTeams) then
+        if not isDarkRP() or not hasDarkRPJobAPI() then
             sendNotice(ply, false, "DarkRP job API is unavailable.")
             return
         end
@@ -642,13 +697,12 @@ local function runAction(ply, action)
         end
 
         if action == "job_create" then
-            local ok, newID = pcall(DarkRP.createJob, spec.name, jobToDarkRP(spec))
-            if not ok or not isnumber(newID) or not istable(RPExtraTeams[newID]) then
-                ErrorNoHalt("[ServerAdmin] DarkRP.createJob failed: " .. jobClean(newID, 180) .. "\n")
-                sendNotice(ply, false, "DarkRP rejected the profession. Check the server console.")
+            local newID, registerError = registerDarkRPJob(spec)
+            if not newID then
+                ErrorNoHalt("[ServerAdmin] DarkRP.createJob failed: " .. jobClean(registerError, 180) .. "\n")
+                sendNotice(ply, false, "DarkRP could not register the profession: " .. jobClean(registerError, 120))
                 return
             end
-            RPExtraTeams[newID].ServerAdminCustom = true
             ServerAdmin.CustomJobs[newID] = spec
             ServerAdmin.StoredCustomJobs[#ServerAdmin.StoredCustomJobs + 1] = spec
             persistCustomJobs()
@@ -851,11 +905,25 @@ local function runAction(ply, action)
             sendNotice(ply, true, "DarkRP wallet updated.")
         elseif action == "setjob" then
             local jobID = net.ReadUInt(16)
-            if not isDarkRP() or not istable(RPExtraTeams) or not RPExtraTeams[jobID] then sendNotice(ply, false, "That DarkRP job does not exist."); return end
-            if not target.changeTeam then sendNotice(ply, false, "DarkRP job switching is unavailable."); return end
-            local ok, err = pcall(function() target:changeTeam(jobID, true, true) end)
-            if not ok then sendNotice(ply, false, "Could not change job: " .. cleanText(err, 120)); return end
-            audit(ply, "job changed", target, cleanText(RPExtraTeams[jobID].name or jobID, 64))
+            local job = istable(RPExtraTeams) and RPExtraTeams[jobID] or nil
+            if not isDarkRP() or not istable(job) then
+                sendNotice(ply, false, "That DarkRP profession does not exist on the server.")
+                return
+            end
+            if not isfunction(target.changeTeam) then
+                sendNotice(ply, false, "DarkRP job switching is unavailable for this player.")
+                return
+            end
+            local ok, result = pcall(target.changeTeam, target, jobID, true, true)
+            if not ok then
+                sendNotice(ply, false, "Could not change job: " .. cleanText(result, 120))
+                return
+            end
+            if not IsValid(target) or target:Team() ~= jobID then
+                sendNotice(ply, false, "DarkRP did not apply the requested profession. Check job restrictions and server hooks.")
+                return
+            end
+            audit(ply, "job changed", target, cleanText(job.name or jobID, 64))
             sendNotice(ply, true, "Player job updated.")
         end
     end
