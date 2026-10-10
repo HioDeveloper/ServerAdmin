@@ -11,7 +11,8 @@ local C = {
 local state = {
     hostname = "Loading...", map = "unknown", maxPlayers = 0, gravity = 600, players = {},
     jobs = {}, customJobs = {}, logs = {}, bans = {}, warnings = {}, cvars = {}, gamemode = "unknown",
-    tickrate = 0, uptime = 0, memory = 0, darkrp = false, lockdown = false, bots = 0, entities = 0
+    tickrate = 0, uptime = 0, memory = 0, darkrp = false, lockdown = false, bots = 0, entities = 0,
+    totalBans = 0, activeBans = 0, totalWarnings = 0, totalActions = 0, metrics = {}
 }
 local frame, playerList, searchEntry, selectedUserID, pages, navButtons
 local notice = { text = "", ok = true, untilTime = 0 }
@@ -497,7 +498,7 @@ local function buildPanel()
     addNav("Audit logs", "logs", 238)
     addNav("Server settings", "settings", 284)
     addNav("Server controls", "server", 330)
-    addNav("Diagnostics", "diagnostics", 376)
+    addNav("Analytics & diagnostics", "diagnostics", 376)
 
     -- Dashboard
     local overview = makePage("overview")
@@ -1029,8 +1030,110 @@ local function buildPanel()
 
     -- Diagnostics
     local diagnostics = makePage("diagnostics")
-    addSection(diagnostics, "Diagnostics", "Only metrics exposed by the game engine or Lua runtime are shown; values are not fabricated.")
-    local diag = vgui.Create("DPanel", diagnostics)
+    addSection(diagnostics, "Analytics & diagnostics", "Live server metrics, moderation totals and a rolling 60-minute history. History resets on server restart.")
+    local analyticsScroll = vgui.Create("DScrollPanel", diagnostics)
+    analyticsScroll:Dock(FILL)
+    analyticsScroll:DockMargin(0, 6, 0, 0)
+
+    local analyticsCards = vgui.Create("DPanel", analyticsScroll)
+    analyticsCards:Dock(TOP); analyticsCards:SetTall(88); analyticsCards:DockMargin(0, 0, 0, 12)
+    analyticsCards.Paint = nil
+    local analyticsDefs = {
+        {"TOTAL BANS", function() return tostring(state.totalBans) end, C.red},
+        {"ACTIVE BANS", function() return tostring(state.activeBans) end, C.orange},
+        {"WARNINGS", function() return tostring(state.totalWarnings) end, C.cyan},
+        {"ADMIN ACTIONS", function() return tostring(state.totalActions) end, C.blue}
+    }
+    local analyticsStatCards = {}
+    for _, def in ipairs(analyticsDefs) do
+        analyticsStatCards[#analyticsStatCards + 1] = addStatCard(analyticsCards, def[1], def[2], def[3])
+    end
+    analyticsCards.PerformLayout = function(self, w, h)
+        local gap = 8
+        local cw = (w - gap * (#analyticsStatCards - 1)) / #analyticsStatCards
+        for i, card in ipairs(analyticsStatCards) do
+            card:SetPos((i - 1) * (cw + gap), 0)
+            card:SetSize(cw, h)
+        end
+    end
+
+    local chartRow = vgui.Create("DPanel", analyticsScroll)
+    chartRow:Dock(TOP); chartRow:SetTall(224); chartRow:DockMargin(0, 0, 0, 12)
+    chartRow.Paint = nil
+
+    local function drawLineChart(panel, titleText, metricKey, accent, valueSuffix, maxValue)
+        panel.Paint = function(self, w, h)
+            rounded(0, 0, w, h, C.panel2, 9)
+            draw.SimpleText(titleText, "DermaDefaultBold", 14, 18, C.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+            local history = state.metrics or {}
+            local left, top, right, bottom = 36, 42, w - 14, h - 28
+            local plotW, plotH = math.max(1, right - left), math.max(1, bottom - top)
+            surface.SetDrawColor(C.border)
+            for i = 0, 4 do
+                local y = top + plotH * i / 4
+                surface.DrawLine(left, y, right, y)
+            end
+            local peak = tonumber(maxValue) or 0
+            for _, sample in ipairs(history) do peak = math.max(peak, tonumber(sample[metricKey]) or 0) end
+            peak = math.max(1, peak)
+            draw.SimpleText(string.format("%.0f%s", peak, valueSuffix or ""), "DermaDefault", 5, top, C.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+            draw.SimpleText("0", "DermaDefault", 14, bottom, C.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+            if #history == 0 then
+                draw.SimpleText("Waiting for metric samples...", "DermaDefault", w / 2, h / 2 + 8, C.muted, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+                return
+            end
+            if #history == 1 then
+                local sample = history[1]
+                local x, y = left, bottom - ((tonumber(sample[metricKey]) or 0) / peak) * plotH
+                surface.SetDrawColor(accent)
+                surface.DrawRect(x - 2, y - 2, 5, 5)
+            else
+                for i = 2, #history do
+                    local a, b = history[i - 1], history[i]
+                    local x1 = left + (i - 2) / (#history - 1) * plotW
+                    local x2 = left + (i - 1) / (#history - 1) * plotW
+                    local y1 = bottom - math.Clamp((tonumber(a[metricKey]) or 0) / peak, 0, 1) * plotH
+                    local y2 = bottom - math.Clamp((tonumber(b[metricKey]) or 0) / peak, 0, 1) * plotH
+                    surface.SetDrawColor(accent)
+                    surface.DrawLine(x1, y1, x2, y2)
+                    surface.DrawRect(x2 - 2, y2 - 2, 4, 4)
+                end
+            end
+            local latest = history[#history]
+            draw.SimpleText("Now: " .. string.format("%.1f", tonumber(latest[metricKey]) or 0) .. (valueSuffix or ""),
+                "DermaDefaultBold", right, 18, accent, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
+        end
+    end
+
+    local playersChart = vgui.Create("DPanel", chartRow)
+    local entitiesChart = vgui.Create("DPanel", chartRow)
+    drawLineChart(playersChart, "PLAYER COUNT · LAST 60 MIN", "players", C.green, "", state.maxPlayers)
+    drawLineChart(entitiesChart, "ENTITY COUNT · LAST 60 MIN", "entities", C.cyan, "", 0)
+    chartRow.PerformLayout = function(self, w, h)
+        local gap = 12
+        local cw = (w - gap) / 2
+        playersChart:SetPos(0, 0); playersChart:SetSize(cw, h)
+        entitiesChart:SetPos(cw + gap, 0); entitiesChart:SetSize(cw, h)
+    end
+
+    local performanceRow = vgui.Create("DPanel", analyticsScroll)
+    performanceRow:Dock(TOP); performanceRow:SetTall(224); performanceRow:DockMargin(0, 0, 0, 12)
+    performanceRow.Paint = nil
+    local tickChart = vgui.Create("DPanel", performanceRow)
+    local memoryChart = vgui.Create("DPanel", performanceRow)
+    drawLineChart(tickChart, "ESTIMATED TICKRATE", "tickrate", C.blue, " TPS", 66)
+    drawLineChart(memoryChart, "LUA MEMORY ESTIMATE", "memory", C.orange, " MB", 0)
+    performanceRow.PerformLayout = function(self, w, h)
+        local gap = 12
+        local cw = (w - gap) / 2
+        tickChart:SetPos(0, 0); tickChart:SetSize(cw, h)
+        memoryChart:SetPos(cw + gap, 0); memoryChart:SetSize(cw, h)
+    end
+
+    local diagRefresh = button(analyticsScroll, "Refresh analytics", C.blue, function() request("refresh") end)
+    diagRefresh:Dock(TOP); diagRefresh:SetTall(36); diagRefresh:DockMargin(0, 0, 0, 12)
+    local diag = vgui.Create("DPanel", analyticsScroll)
+    diag:Dock(TOP); diag:SetTall(250); diag:DockMargin(0, 0, 0, 14)
     diag:Dock(TOP); diag:SetTall(250); diag:DockMargin(0, 10, 0, 14)
     diag.Paint = function(self, w, h)
         rounded(0, 0, w, h, C.panel2, 9)
@@ -1052,9 +1155,6 @@ local function buildPanel()
             draw.SimpleText(tostring(pair[2]), "DermaDefaultBold", 230, y, C.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
         end
     end
-    local diagRefresh = button(diagnostics, "Refresh diagnostics", C.blue, function() request("refresh") end)
-    diagRefresh:Dock(TOP); diagRefresh:SetWide(190)
-
     showPage(activePage or "overview")
     request("refresh")
 end
@@ -1256,6 +1356,22 @@ net.Receive(NET, function()
     state.lockdown = net.ReadBool()
     state.bots = net.ReadUInt(8)
     state.entities = net.ReadUInt(16)
+    state.totalBans = net.ReadUInt(32)
+    state.activeBans = net.ReadUInt(32)
+    state.totalWarnings = net.ReadUInt(32)
+    state.totalActions = net.ReadUInt(32)
+    local metricCount = net.ReadUInt(7)
+    state.metrics = {}
+    for i = 1, metricCount do
+        state.metrics[#state.metrics + 1] = {
+            time = net.ReadUInt(32),
+            players = net.ReadUInt(8),
+            bots = net.ReadUInt(8),
+            entities = net.ReadUInt(16),
+            tickrate = net.ReadFloat(),
+            memory = net.ReadFloat()
+        }
+    end
 
     refreshPlayerList()
 end)
