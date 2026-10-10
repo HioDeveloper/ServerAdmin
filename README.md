@@ -29,7 +29,8 @@ ServerAdmin is a full-screen, in-game administration centre for Garry's Mod. It 
 - Voice mute/unmute, chat gag/ungag, god mode, strip weapons, ignite/extinguish, set health and set armour.
 - DarkRP wallet set/adjust and registered job switching.
 - Create custom DarkRP professions from the in-game editor: name, chat command, description, player models, weapon loadout, F4 category, salary, player limit, access level, voting, license requirement and RGB color.
-- Edit ServerAdmin-created professions; their settings are stored in `data/serveradmin/custom_jobs.json` and restored after DarkRP finishes loading.
+- Edit and delete ServerAdmin-created professions; definitions are stored in `data/serveradmin/custom_jobs.json` and restored after DarkRP finishes loading.
+- When deleting a custom profession, connected players using it are moved to a safe fallback job first; default DarkRP and third-party professions cannot be deleted from this panel.
 - Custom profession definitions are synchronized to connected clients and reflected in the local DarkRP job registry/F4 categories.
 - Profession chat commands remain fixed after creation because DarkRP maintains an internal command registry. Default jobs from DarkRP or other addons are not edited in-place to avoid overwriting third-party configuration.
 
@@ -45,6 +46,7 @@ ServerAdmin is a full-screen, in-game administration centre for Garry's Mod. It 
 ### Audit and persistence
 - SQLite tables store ServerAdmin actions, bans and warnings.
 - The audit log records the administrator, action, target and details.
+- Superadmins can clear the ServerAdmin audit log from the in-game panel; this does not delete ban or warning records.
 - Timed ServerAdmin ban records are marked expired when their expiry time has passed.
 - The add-on does not provide group/role management or arbitrary RCON/console-command execution.
 
