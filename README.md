@@ -65,3 +65,8 @@ ServerAdmin is a full-screen, in-game administration centre for Garry's Mod. It 
 The add-on uses standard Garry's Mod APIs and optional DarkRP APIs. DarkRP job switching depends on the server's actual DarkRP configuration and other installed addons. ServerAdmin ban history tracks bans created through this panel; bans created outside ServerAdmin may not appear in its history.
 
 **Test on a private server before using it in production.** In particular, verify ban/unban persistence, DarkRP job switching, server-variable availability, voice mute behaviour and interactions with other moderation or Sandbox addons. I can update the code directly, but cannot claim in-game validation without running a Garry's Mod server.
+
+## Analytics
+
+- Analytics dashboard with totals for bans, active bans, warnings and recorded administration actions.
+- Rolling 60-minute line charts for connected players, entity count, estimated tickrate and Lua memory estimate. Samples are held in memory and reset when the server restarts.
