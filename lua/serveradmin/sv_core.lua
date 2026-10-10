@@ -8,6 +8,8 @@ local NET = "serveradmin_net"
 util.AddNetworkString(NET)
 
 local startedAt = SysTime()
+local metricHistory = {}
+local METRIC_HISTORY_LIMIT = 60
 local lastRequest = setmetatable({}, { __mode = "k" })
 local Frozen, Muted, Gagged, GodMode = {}, {}, {}, {}
 ServerAdmin.Lockdown = ServerAdmin.Lockdown == true
@@ -528,6 +530,35 @@ local function readCvar(item)
     return cleanText(cv:GetString(), 80)
 end
 
+local function sampleServerMetrics()
+    local players = player.GetAll()
+    local bots = 0
+    for _, ply in ipairs(players) do
+        if IsValid(ply) and ply:IsBot() then bots = bots + 1 end
+    end
+
+    metricHistory[#metricHistory + 1] = {
+        time = os.time(),
+        players = #players,
+        bots = bots,
+        entities = #ents.GetAll(),
+        tickrate = math.Clamp(1 / math.max(engine.TickInterval(), 0.001), 0, 1000),
+        memory = math.max(0, collectgarbage("count") / 1024)
+    }
+    while #metricHistory > METRIC_HISTORY_LIMIT do
+        table.remove(metricHistory, 1)
+    end
+end
+
+sampleServerMetrics()
+timer.Create("ServerAdmin_MetricSampler", 60, 0, sampleServerMetrics)
+
+local function countRows(query)
+    local rows = sql.Query(query)
+    if not istable(rows) or not rows[1] then return 0 end
+    return math.max(0, tonumber(rows[1].total) or 0)
+end
+
 local function sendSnapshot(ply)
     if not isAdmin(ply) then
         sendNotice(ply, false, "You do not have permission to use ServerAdmin.")
@@ -647,6 +678,24 @@ local function sendSnapshot(ply)
         net.WriteBool(ServerAdmin.Lockdown == true)
         net.WriteUInt(math.Clamp(botCount, 0, 255), 8)
         net.WriteUInt(math.Clamp(#entities, 0, 65535), 16)
+
+        local totalBans = countRows("SELECT COUNT(*) AS total FROM serveradmin_bans")
+        local activeBans = countRows("SELECT COUNT(*) AS total FROM serveradmin_bans WHERE active = 1")
+        local totalWarnings = countRows("SELECT COUNT(*) AS total FROM serveradmin_warnings")
+        local totalActions = countRows("SELECT COUNT(*) AS total FROM serveradmin_audit")
+        net.WriteUInt(math.Clamp(totalBans, 0, 4294967295), 32)
+        net.WriteUInt(math.Clamp(activeBans, 0, 4294967295), 32)
+        net.WriteUInt(math.Clamp(totalWarnings, 0, 4294967295), 32)
+        net.WriteUInt(math.Clamp(totalActions, 0, 4294967295), 32)
+        net.WriteUInt(math.min(#metricHistory, METRIC_HISTORY_LIMIT), 7)
+        for _, sample in ipairs(metricHistory) do
+            net.WriteUInt(math.Clamp(sample.time % 4294967296, 0, 4294967295), 32)
+            net.WriteUInt(math.Clamp(sample.players, 0, 255), 8)
+            net.WriteUInt(math.Clamp(sample.bots, 0, 255), 8)
+            net.WriteUInt(math.Clamp(sample.entities, 0, 65535), 16)
+            net.WriteFloat(sample.tickrate)
+            net.WriteFloat(sample.memory)
+        end
     net.Send(ply)
     sendCustomJobSync(ply)
 end
