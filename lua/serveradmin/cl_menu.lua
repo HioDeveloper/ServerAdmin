@@ -10,7 +10,7 @@ local C = {
 }
 local state = {
     hostname = "Loading...", map = "unknown", maxPlayers = 0, gravity = 600, players = {},
-    jobs = {}, logs = {}, bans = {}, warnings = {}, cvars = {}, gamemode = "unknown",
+    jobs = {}, customJobs = {}, logs = {}, bans = {}, warnings = {}, cvars = {}, gamemode = "unknown",
     tickrate = 0, uptime = 0, memory = 0, darkrp = false, lockdown = false, bots = 0, entities = 0
 }
 local frame, playerList, searchEntry, selectedUserID, pages, navButtons
@@ -204,6 +204,197 @@ local function addInput(parent, titleText, initial, placeholder)
     entry:SetText(tostring(initial or ""))
     if placeholder then entry:SetPlaceholderText(placeholder) end
     return entry
+end
+
+local function openJobEditor(mode, jobData)
+    jobData = jobData or {}
+    local editing = mode == "edit"
+    local jobColor = Color(
+        math.Clamp(tonumber(jobData.r) or 40, 0, 255),
+        math.Clamp(tonumber(jobData.g) or 150, 0, 255),
+        math.Clamp(tonumber(jobData.b) or 220, 0, 255)
+    )
+
+    local editor = vgui.Create("DFrame")
+    editor:SetSize(math.min(680, ScrW() - 60), math.min(760, ScrH() - 60))
+    editor:Center()
+    editor:SetTitle("")
+    editor:ShowCloseButton(false)
+    editor:SetDraggable(true)
+    editor:MakePopup()
+    editor.Paint = function(self, w, h)
+        rounded(0, 0, w, h, C.bg, 12)
+        draw.RoundedBoxEx(12, 0, 0, w, 68, C.panel2, true, true, false, false)
+        draw.SimpleText(editing and "EDIT CUSTOM PROFESSION" or "CREATE CUSTOM PROFESSION",
+            "DermaLarge", 22, 25, C.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+        draw.SimpleText("DARKRP JOB EDITOR  /  SAVED ON SERVER",
+            "DermaDefaultBold", 24, 49, C.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+        surface.SetDrawColor(C.border)
+        surface.DrawOutlinedRect(0, 0, w, h, 1)
+    end
+
+    local body = vgui.Create("DScrollPanel", editor)
+    body:Dock(FILL)
+    body:DockMargin(18, 82, 18, 10)
+
+    local function field(titleText, initial, height, multiline, placeholder)
+        local wrap = vgui.Create("DPanel", body)
+        wrap:Dock(TOP)
+        wrap:SetTall((height or 34) + 27)
+        wrap:DockMargin(0, 0, 0, 8)
+        wrap.Paint = function(self, w, h)
+            draw.SimpleText(titleText, "DermaDefaultBold", 2, 10, C.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+        end
+        local entry = vgui.Create("DTextEntry", wrap)
+        entry:Dock(BOTTOM)
+        entry:SetTall(height or 34)
+        entry:SetText(tostring(initial or ""))
+        entry:SetPlaceholderText(placeholder or "")
+        entry:SetFont("DermaDefault")
+        entry:SetTextColor(C.text)
+        if multiline then entry:SetMultiline(true) end
+        entry.Paint = function(self, w, h)
+            draw.RoundedBox(6, 0, 0, w, h, C.panel2)
+            surface.SetDrawColor(self:HasFocus() and C.blue or C.border)
+            surface.DrawOutlinedRect(0, 0, w, h, 1)
+            self:DrawTextEntryText(C.text, C.blue, C.text)
+        end
+        return entry
+    end
+
+    local nameEntry = field("Profession name", jobData.name or "", 34, false, "e.g. Emergency Medic")
+    local commandEntry = field("Chat command (without /)", jobData.command or "newjob", 34, false, "e.g. emergency_medic")
+    if editing then
+        commandEntry:SetEditable(false)
+        commandEntry:SetTooltip("DarkRP registers job commands internally. The command is fixed after creation.")
+    end
+    local descriptionEntry = field("Description", jobData.description or "", 76, true, "Describe the role and its duties")
+    local modelEntry = field("Player models (comma-separated)", table.concat(jobData.models or {"models/player/kleiner.mdl"}, ", "), 46, false, "models/player/kleiner.mdl")
+    local weaponEntry = field("Spawn weapons (comma-separated class names)", table.concat(jobData.weapons or {}, ", "), 46, false, "weapon_fists, weapon_physcannon")
+    local categoryEntry = field("F4 category", jobData.category or "Citizens", 34, false, "e.g. Civil Protection")
+    local salaryEntry = field("Salary per payout", jobData.salary or 45, 34, false, "45")
+    local maxEntry = field("Maximum players (0 = unlimited)", jobData.max or 0, 34, false, "0")
+
+    local accessWrap = vgui.Create("DPanel", body)
+    accessWrap:Dock(TOP)
+    accessWrap:SetTall(62)
+    accessWrap:DockMargin(0, 0, 0, 8)
+    accessWrap.Paint = function(self, w, h)
+        draw.SimpleText("Who can use this profession?", "DermaDefaultBold", 2, 10, C.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+    end
+    local accessEntry = vgui.Create("DComboBox", accessWrap)
+    accessEntry:Dock(BOTTOM)
+    accessEntry:SetTall(34)
+    accessEntry:AddChoice("Everyone", 0)
+    accessEntry:AddChoice("Administrators", 1)
+    accessEntry:AddChoice("Superadmins", 2)
+    accessEntry:SetValue(({[0] = "Everyone", [1] = "Administrators", [2] = "Superadmins"})[tonumber(jobData.admin) or 0])
+    accessEntry:SetTextColor(C.text)
+    accessEntry.Paint = function(self, w, h)
+        draw.RoundedBox(6, 0, 0, w, h, C.panel2)
+        surface.SetDrawColor(C.border); surface.DrawOutlinedRect(0, 0, w, h, 1)
+        self:DrawTextEntryText(C.text, C.blue, C.text)
+    end
+
+    local switches = vgui.Create("DPanel", body)
+    switches:Dock(TOP)
+    switches:SetTall(36)
+    switches:DockMargin(0, 0, 0, 8)
+    switches.Paint = nil
+    local voteCheck = vgui.Create("DCheckBoxLabel", switches)
+    voteCheck:SetText("Requires a vote")
+    voteCheck:SetTextColor(C.text)
+    voteCheck:SetValue(jobData.vote and 1 or 0)
+    voteCheck:SizeToContents()
+    voteCheck:SetPos(2, 8)
+    local licenseCheck = vgui.Create("DCheckBoxLabel", switches)
+    licenseCheck:SetText("Requires gun license")
+    licenseCheck:SetTextColor(C.text)
+    licenseCheck:SetValue(jobData.hasLicense and 1 or 0)
+    licenseCheck:SizeToContents()
+    licenseCheck:SetPos(220, 8)
+
+    local colorButton = button(body, "Choose profession color", C.panel2, function()
+        if not Derma_ColorRequest then
+            notify("The color picker is unavailable in this client.", false)
+            return
+        end
+        Derma_ColorRequest("Profession color", jobColor, function(chosen)
+            if not IsValid(editor) or not IsColor(chosen) then return end
+            jobColor = Color(chosen.r, chosen.g, chosen.b)
+            colorButton:SetText("")
+            colorButton.Paint = function(self, w, h)
+                draw.RoundedBox(6, 0, 0, w, h, jobColor)
+                surface.SetDrawColor(C.border); surface.DrawOutlinedRect(0, 0, w, h, 1)
+                draw.SimpleText("COLOR  RGB " .. jobColor.r .. ", " .. jobColor.g .. ", " .. jobColor.b,
+                    "DermaDefaultBold", w / 2, h / 2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+            end
+        end)
+    end, 36)
+    colorButton:Dock(TOP)
+    colorButton:DockMargin(0, 0, 0, 12)
+    colorButton.Paint = function(self, w, h)
+        draw.RoundedBox(6, 0, 0, w, h, jobColor)
+        surface.SetDrawColor(C.border); surface.DrawOutlinedRect(0, 0, w, h, 1)
+        draw.SimpleText("COLOR  RGB " .. jobColor.r .. ", " .. jobColor.g .. ", " .. jobColor.b,
+            "DermaDefaultBold", w / 2, h / 2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+    end
+
+    local help = label(body, editing and
+        "Only ServerAdmin-created professions can be edited here. The chat command stays fixed so DarkRP command registrations remain consistent." or
+        "Use mounted models and valid weapon class names. Changes are saved to server data and restored when DarkRP loads.", "DermaDefault", C.muted)
+    help:Dock(TOP)
+    help:SetTall(38)
+
+    local footer = vgui.Create("DPanel", editor)
+    footer:Dock(BOTTOM)
+    footer:SetTall(54)
+    footer:DockMargin(18, 0, 18, 14)
+    footer.Paint = function(self, w, h)
+        surface.SetDrawColor(C.border)
+        surface.DrawRect(0, 0, w, 1)
+    end
+    local cancel = button(footer, "Cancel", C.panel2, function() editor:Close() end, 36)
+    cancel:Dock(RIGHT)
+    cancel:SetWide(110)
+    cancel:DockMargin(8, 8, 0, 0)
+
+    local save = button(footer, editing and "Save changes" or "Create profession", C.blue, function()
+        local _, accessData = accessEntry:GetSelected()
+        local accessLevel = tonumber(accessData)
+        if accessLevel == nil then
+            local accessByName = {Everyone = 0, Administrators = 1, Superadmins = 2}
+            accessLevel = accessByName[accessEntry:GetValue()] or 0
+        end
+        local data = {
+            name = nameEntry:GetValue(),
+            command = commandEntry:GetValue(),
+            description = descriptionEntry:GetValue(),
+            modelText = modelEntry:GetValue(),
+            weaponsText = weaponEntry:GetValue(),
+            category = categoryEntry:GetValue(),
+            salary = tonumber(salaryEntry:GetValue()),
+            max = tonumber(maxEntry:GetValue()),
+            admin = accessLevel,
+            vote = voteCheck:GetChecked(),
+            hasLicense = licenseCheck:GetChecked(),
+            r = jobColor.r, g = jobColor.g, b = jobColor.b
+        }
+        local json = util.TableToJSON(data, false)
+        if not json or #json > 12000 then
+            notify("Profession form is too large. Shorten the description or lists.", false)
+            return
+        end
+        request(editing and "job_edit" or "job_create", function()
+            if editing then net.WriteUInt(tonumber(jobData.id) or 0, 16) end
+            net.WriteString(json)
+        end)
+        editor:Close()
+    end, 36)
+    save:Dock(FILL)
+    save:DockMargin(0, 8, 0, 0)
+
+    return editor
 end
 
 local function formatDuration(seconds)
@@ -540,26 +731,49 @@ local function buildPanel()
     jobList.OnRowSelected = function(_, _, line) selectedJob = line.serveradminJobID end
     jobList.Think = function(self)
         local signature = ""
-        for _, job in ipairs(state.jobs) do signature = signature .. "|" .. job.id .. ":" .. job.name .. ":" .. job.command .. ":" .. job.salary end
+        for _, job in ipairs(state.jobs) do signature = signature .. "|" .. job.id .. ":" .. job.name .. ":" .. job.command .. ":" .. job.salary .. ":" .. tostring(state.customJobs[job.id] ~= nil) end
         if self.serveradminJobsSignature == signature then return end
         self.serveradminJobsSignature = signature
         self:Clear()
         for _, job in ipairs(state.jobs) do
-            local line = self:AddLine(job.name, job.command, "$" .. tostring(job.salary))
+            local line = self:AddLine(job.name .. (state.customJobs[job.id] and "  [CUSTOM]" or ""), job.command, "$" .. tostring(job.salary))
             line.serveradminJobID = job.id
         end
     end
     local jobActions = vgui.Create("DPanel", darkrpPage)
-    jobActions:Dock(BOTTOM); jobActions:SetTall(80); jobActions.Paint = nil
-    local jobTarget = button(jobActions, "Set selected player's job", C.blue, function()
+    jobActions:Dock(BOTTOM); jobActions:SetTall(100); jobActions:DockMargin(0, 8, 0, 0)
+    jobActions.Paint = function(self, w, h)
+        surface.SetDrawColor(C.border)
+        surface.DrawRect(0, 0, w, 1)
+    end
+
+    local createJobButton = button(jobActions, "Create profession", C.green, function()
+        if not state.darkrp then notify("DarkRP is not available.", false) return end
+        openJobEditor("create")
+    end, 36)
+    createJobButton:SetPos(0, 8); createJobButton:SetSize(160, 36)
+
+    local editJobButton = button(jobActions, "Edit selected", C.blue, function()
+        if not selectedJob then notify("Select a profession first.", false) return end
+        local custom = state.customJobs[selectedJob]
+        if not custom then
+            notify("Only ServerAdmin-created professions can be edited here.", false)
+            return
+        end
+        openJobEditor("edit", custom)
+    end, 36)
+    editJobButton:SetPos(168, 8); editJobButton:SetSize(145, 36)
+
+    local jobTarget = button(jobActions, "Assign to selected player", C.panel2, function()
         local p = selectedPlayer()
         if not p then notify("Select a player on the Players page first.", false) return end
         if not selectedJob then notify("Select a job first.", false) return end
         sendTargetAction("setjob", p, function() net.WriteUInt(selectedJob, 16) end)
-    end)
-    jobTarget:Dock(LEFT); jobTarget:SetWide(230); jobTarget:DockMargin(0, 8, 10, 0)
-    local moneyHint = label(jobActions, "Money controls are available on Players & moderation. Economy changes require superadmin.", "DermaDefault", C.muted)
-    moneyHint:Dock(FILL); moneyHint:DockMargin(4, 8, 0, 0)
+    end, 36)
+    jobTarget:SetPos(321, 8); jobTarget:SetSize(220, 36)
+
+    local moneyHint = label(jobActions, "Custom professions are saved to server data. Changes are synchronized to clients.", "DermaDefault", C.muted)
+    moneyHint:SetPos(2, 54); moneyHint:SetSize(650, 28)
 
     -- Separate persistent bans and warning histories
     local bansPage = makePage("bans")
