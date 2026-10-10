@@ -36,6 +36,8 @@ ServerAdmin is a full-screen, in-game administration centre for Garry's Mod. It 
 
 ### Server controls
 - Set hostname, gravity and change map.
+- Edit a persistent MOTD title and message from the panel; it is shown to new joiners and can be previewed or broadcast to everyone online.
+- Superadmin-only RCON-style server console with validated single-command execution and quoted arguments. Command output remains in the dedicated server console/logs.
 - Create up to ten bots per request, remove all bots, and kick individual bots from the player list.
 - Broadcast an announcement to all players.
 - Clean up map entities, with a confirmation prompt.
@@ -48,7 +50,7 @@ ServerAdmin is a full-screen, in-game administration centre for Garry's Mod. It 
 - The audit log records the administrator, action, target and details.
 - Superadmins can clear the ServerAdmin audit log from the in-game panel; this does not delete ban or warning records.
 - Timed ServerAdmin ban records are marked expired when their expiry time has passed.
-- The add-on does not provide group/role management or arbitrary RCON/console-command execution.
+- The add-on does not provide group/role management. The RCON-style console blocks Lua script loaders, config loaders, password-changing RCON and shutdown commands; it is not a replacement for a trusted host's full server console.
 
 ## Permissions and safety
 
@@ -56,7 +58,7 @@ ServerAdmin is a full-screen, in-game administration centre for Garry's Mod. It 
 - Server configuration, map changes, economy/job changes, custom profession creation/editing, unbans, bot management, announcements, cleanup, lockdown and health/armour overrides require superadmin.
 - Every action is permission-checked again on the server; hiding a button in the client is never considered access control.
 - A regular admin cannot target a superadmin. Several high-impact actions against administrators are restricted to superadmins.
-- Variable updates use a strict allow-list and validated values; the client cannot submit arbitrary commands.
+- Server variable updates use a strict allow-list and validated values. The separate RCON-style command tool is superadmin-only, rejects command separators/newlines, parses quoted arguments, and blocks high-risk script/config/shutdown commands.
 - Map names are validated and the requested .bsp file must exist on the server.
 - Build lockdown blocks common Sandbox spawn hooks for non-admins. Gamemodes and other addons that replace those hooks may require compatibility testing.
 
