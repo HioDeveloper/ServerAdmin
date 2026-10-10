@@ -700,12 +700,89 @@ local function sendSnapshot(ply)
     sendCustomJobSync(ply)
 end
 
+local MOTD_PATH = "serveradmin/motd.json"
+local MOTD_MAX_BODY = 8000
+file.CreateDir("serveradmin")
+
+local function cleanMultiline(value, maxLength)
+    value = tostring(value or "")
+    value = string.gsub(value, "\r\n?", "\n")
+    value = string.gsub(value, "[%z\1-\8\11\12\14-\31]", "")
+    return string.sub(value, 1, maxLength or MOTD_MAX_BODY)
+end
+
+local function readMOTD()
+    local raw = file.Read(MOTD_PATH, "DATA")
+    local stored = raw and util.JSONToTable(raw) or nil
+    if not istable(stored) then
+        return {
+            title = "Welcome to the server",
+            body = "Welcome! Please read the server rules and treat other players with respect."
+        }
+    end
+
+    local title = cleanText(stored.title or "Welcome to the server", 80)
+    if title == "" then title = "Welcome to the server" end
+    return {
+        title = title,
+        body = cleanMultiline(stored.body or "", MOTD_MAX_BODY)
+    }
+end
+
+local function sendMOTD(ply, messageKind)
+    if not IsValid(ply) then return end
+    local motd = readMOTD()
+    if motd.body == "" then return end
+    net.Start(NET)
+        net.WriteString(messageKind or "motd_show")
+        net.WriteString(motd.title)
+        net.WriteString(motd.body)
+    net.Send(ply)
+end
+
+local function parseConsoleArguments(raw)
+    local args, token = {}, ""
+    local quoted = false
+    raw = tostring(raw or "")
+    for i = 1, #raw do
+        local ch = string.sub(raw, i, i)
+        if ch == '"' then
+            quoted = not quoted
+        elseif ch == " " and not quoted then
+            if token ~= "" then
+                args[#args + 1] = token
+                token = ""
+            end
+        else
+            token = token .. ch
+        end
+    end
+
+    if quoted then return nil, "Unclosed quotation marks in arguments." end
+    if token ~= "" then args[#args + 1] = token end
+    if #args > 16 then return nil, "Too many command arguments (maximum 16)." end
+    for i, arg in ipairs(args) do
+        if #arg > 160 then return nil, "A command argument is too long." end
+        args[i] = cleanText(arg, 160)
+    end
+    return args
+end
+
+local BLOCKED_RCON_COMMANDS = {
+    lua_run = true, lua_run_cl = true, lua_open = true,
+    lua_openscript = true, lua_openscript_cl = true,
+    exec = true, plugin_load = true, con_logfile = true,
+    quit = true, exit = true, _restart = true, restart = true,
+    rcon_password = true
+}
+
 local SUPERADMIN_ACTIONS = {
     job_create = true, job_edit = true,
     hostname = true, gravity = true, map = true, setmoney = true, addmoney = true, setjob = true,
     unban = true, setcvar = true, botadd = true, botkickall = true, announce = true,
     cleanup = true, lockdown = true, sethealth = true, setarmor = true,
-    job_delete = true, clearlogs = true
+    job_delete = true, clearlogs = true,
+    motd_get = true, motd_save = true, motd_broadcast = true, rcon = true
 }
 local TARGET_ACTIONS = {
     kick = true, ban = true, warn = true, freeze = true, unfreeze = true, slay = true,
@@ -738,6 +815,69 @@ local function runAction(ply, action)
     if action == "refresh" then sendSnapshot(ply) return end
     if SUPERADMIN_ACTIONS[action] and not isSuperAdmin(ply) then
         sendNotice(ply, false, "Superadmin permission required.")
+        return
+    end
+
+    if action == "motd_get" then
+        sendMOTD(ply, "motd_data")
+        return
+    elseif action == "motd_save" then
+        local title = cleanText(net.ReadString(), 80)
+        local body = net.ReadString()
+        if not isstring(body) or #body > MOTD_MAX_BODY then
+            sendNotice(ply, false, "MOTD body is too long (maximum 8000 characters).")
+            return
+        end
+        if title == "" then title = "Welcome to the server" end
+        body = cleanMultiline(body, MOTD_MAX_BODY)
+        local encoded = util.TableToJSON({ title = title, body = body }, true)
+        if not encoded then
+            sendNotice(ply, false, "Could not encode MOTD data.")
+            return
+        end
+        file.CreateDir("serveradmin")
+        file.Write(MOTD_PATH, encoded)
+        if not file.Read(MOTD_PATH, "DATA") then
+            sendNotice(ply, false, "Could not save MOTD to server data storage.")
+            return
+        end
+        audit(ply, "MOTD updated", nil, title)
+        sendNotice(ply, true, "MOTD saved on the server.")
+        return
+    elseif action == "motd_broadcast" then
+        local motd = readMOTD()
+        if motd.body == "" then
+            sendNotice(ply, false, "MOTD is empty. Save a message first.")
+            return
+        end
+        net.Start(NET)
+            net.WriteString("motd_show")
+            net.WriteString(motd.title)
+            net.WriteString(motd.body)
+        net.Broadcast()
+        audit(ply, "MOTD broadcast", nil, motd.title)
+        sendNotice(ply, true, "MOTD displayed to all connected players.")
+        return
+    elseif action == "rcon" then
+        local command = string.Trim(net.ReadString() or "")
+        local rawArgs = cleanText(net.ReadString(), 512)
+        if command == "" or #command > 64 or not string.match(command, "^[%w_%.%-]+$") then
+            sendNotice(ply, false, "Enter one valid console command name.")
+            return
+        end
+        command = string.lower(command)
+        if BLOCKED_RCON_COMMANDS[command] then
+            sendNotice(ply, false, "This high-risk command is blocked in ServerAdmin.")
+            return
+        end
+        local args, parseError = parseConsoleArguments(rawArgs)
+        if not args then
+            sendNotice(ply, false, parseError or "Invalid console arguments.")
+            return
+        end
+        RunConsoleCommand(command, unpack(args))
+        audit(ply, "RCON command", nil, command .. (rawArgs ~= "" and " (arguments omitted from audit)" or ""))
+        sendNotice(ply, true, "Command sent to server console: " .. command)
         return
     end
 
@@ -1120,6 +1260,12 @@ for _, hookName in ipairs(blockedSpawnHooks) do
         if ServerAdmin.Lockdown and IsValid(ply) and ply:IsPlayer() and not ply:IsAdmin() then return false end
     end)
 end
+
+hook.Add("PlayerInitialSpawn", "ServerAdmin_MOTDDelivery", function(ply)
+    timer.Simple(12, function()
+        if IsValid(ply) then sendMOTD(ply, "motd_show") end
+    end)
+end)
 
 hook.Add("PlayerDisconnected", "ServerAdmin_ClearRuntimeFlags", function(ply)
     local id = idForPlayer(ply)
