@@ -303,6 +303,19 @@ local function findStoredIndex(command)
     end
 end
 
+local function hasJobCategory(category)
+    if not istable(DarkRP) or not isfunction(DarkRP.getCategories) then return false end
+    local ok, categories = pcall(DarkRP.getCategories)
+    if not ok or not istable(categories) or not istable(categories.jobs) then return false end
+
+    for _, entry in ipairs(categories.jobs) do
+        if istable(entry) and tostring(entry.name or "") == tostring(category or "") then
+            return true
+        end
+    end
+    return false
+end
+
 local function persistCustomJobs()
     file.CreateDir("serveradmin")
     local payload = util.TableToJSON(ServerAdmin.StoredCustomJobs or {}, true)
@@ -332,6 +345,9 @@ end
 local function registerDarkRPJob(spec)
     if not hasDarkRPJobAPI() then
         return nil, "DarkRP job API is not ready."
+    end
+    if not hasJobCategory(spec.category) then
+        return nil, "DarkRP category '" .. jobClean(spec.category, 48) .. "' does not exist. Choose a category already defined in DarkRP."
     end
 
     local ok, returnedID = pcall(DarkRP.createJob, spec.name, jobToDarkRP(spec))
@@ -693,6 +709,10 @@ local function runAction(ply, action)
         local existingID = findJobByCommand(spec.command, action == "job_edit" and jobID or nil)
         if existingID then
             sendNotice(ply, false, "This command is already used by profession ID " .. tostring(existingID) .. ".")
+            return
+        end
+        if not hasJobCategory(spec.category) then
+            sendNotice(ply, false, "DarkRP category '" .. jobClean(spec.category, 48) .. "' does not exist. Use a category already defined by the server.")
             return
         end
 
