@@ -108,7 +108,9 @@ local function styleListView(list)
     for _, column in ipairs(list.Columns or {}) do
         local header = column.Header
         if IsValid(header) then
-            header:SetTextColor(C.text)
+            -- DListView_Column headers inherit a DLabel that draws the title itself.
+            -- Hide only that built-in text; the custom Paint below draws the visible title once.
+            header:SetTextColor(Color(C.text.r, C.text.g, C.text.b, 0))
             header:SetFont("DermaDefaultBold")
             header.Paint = function(self, w, h)
                 draw.RoundedBox(4, 2, 2, w - 4, h - 4, C.panel2)
