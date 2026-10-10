@@ -15,6 +15,8 @@ local state = {
     totalBans = 0, activeBans = 0, totalWarnings = 0, totalActions = 0, metrics = {}
 }
 local frame, playerList, searchEntry, selectedUserID, pages, navButtons
+local motdTitleEntry, motdBodyEntry, rconCommandEntry, rconArgsEntry
+local motdViewer
 local notice = { text = "", ok = true, untilTime = 0 }
 local f6WasDown = false
 local activePage = "overview"
@@ -205,6 +207,43 @@ local function addInput(parent, titleText, initial, placeholder)
     entry:SetText(tostring(initial or ""))
     if placeholder then entry:SetPlaceholderText(placeholder) end
     return entry
+end
+
+
+local function openMOTDViewer(titleText, bodyText)
+    if IsValid(motdViewer) then motdViewer:Remove() end
+
+    motdViewer = vgui.Create("DFrame")
+    motdViewer:SetSize(math.min(760, ScrW() - 48), math.min(620, ScrH() - 48))
+    motdViewer:Center()
+    motdViewer:SetTitle("")
+    motdViewer:ShowCloseButton(false)
+    motdViewer:SetDraggable(true)
+    motdViewer:MakePopup()
+    motdViewer.Paint = function(self, w, h)
+        rounded(0, 0, w, h, C.bg, 12)
+        draw.RoundedBoxEx(12, 0, 0, w, 68, C.panel2, true, true, false, false)
+        draw.SimpleText(string.sub(tostring(titleText or "Message of the day"), 1, 80),
+            "DermaLarge", 20, 27, C.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+        draw.SimpleText("SERVER MESSAGE", "DermaDefaultBold", 22, 49, C.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+        surface.SetDrawColor(C.border)
+        surface.DrawOutlinedRect(0, 0, w, h, 1)
+    end
+
+    local body = vgui.Create("DTextEntry", motdViewer)
+    body:Dock(FILL)
+    body:DockMargin(18, 82, 18, 58)
+    body:SetMultiline(true)
+    body:SetEditable(false)
+    body:SetFont("DermaDefault")
+    body:SetText(tostring(bodyText or ""))
+
+    local close = button(motdViewer, "CLOSE", C.blue, function()
+        if IsValid(motdViewer) then motdViewer:Close() end
+    end, 36)
+    close:SetSize(120, 36)
+    close:AlignBottom(12)
+    close:CenterHorizontal()
 end
 
 local function openJobEditor(mode, jobData)
@@ -465,7 +504,11 @@ local function buildPanel()
         activePage = key
         for name, page in pairs(pages) do if IsValid(page) then page:SetVisible(name == key) end end
         for name, nav in pairs(navButtons) do if IsValid(nav) then nav.serveradminActive = name == key end end
-        if key == "players" or key == "logs" or key == "bans" or key == "darkrp" or key == "server" then request("refresh") end
+        if key == "players" or key == "logs" or key == "bans" or key == "darkrp" or key == "server" then
+            request("refresh")
+        elseif key == "motd" then
+            request("motd_get")
+        end
     end
     local function addNav(text, key, y)
         local nav = vgui.Create("DButton", sidebar)
@@ -499,6 +542,7 @@ local function buildPanel()
     addNav("Server settings", "settings", 284)
     addNav("Server controls", "server", 330)
     addNav("Analytics & diagnostics", "diagnostics", 376)
+    addNav("MOTD & RCON", "motd", 422)
 
     -- Dashboard
     local overview = makePage("overview")
@@ -1028,6 +1072,88 @@ local function buildPanel()
     end)
     saveCvar:Dock(TOP); saveCvar:DockMargin(0, 0, 0, 4); saveCvar:SetWide(220)
 
+    -- MOTD editor and RCON-style server console
+    local motdPage = makePage("motd")
+    addSection(motdPage, "MOTD & RCON", "Edit the saved message shown to joining players, or run a server console command as superadmin.")
+    local motdScroll = vgui.Create("DScrollPanel", motdPage)
+    motdScroll:Dock(FILL)
+    motdScroll:DockMargin(0, 8, 0, 0)
+
+    local motdHeader = label(motdScroll, "MESSAGE OF THE DAY", "DermaDefaultBold", C.cyan)
+    motdHeader:Dock(TOP)
+    motdHeader:SetTall(28)
+    motdTitleEntry = addInput(motdScroll, "MOTD title", "Welcome to the server", "Welcome to the server")
+
+    local motdBodyWrap = vgui.Create("DPanel", motdScroll)
+    motdBodyWrap:Dock(TOP)
+    motdBodyWrap:SetTall(244)
+    motdBodyWrap:DockMargin(0, 4, 0, 8)
+    motdBodyWrap.Paint = function(self, w, h) rounded(0, 0, w, h, C.panel2, 8) end
+    local motdBodyLabel = label(motdBodyWrap, "Message text (up to 8000 characters)", "DermaDefaultBold", C.muted)
+    motdBodyLabel:SetPos(10, 7)
+    motdBodyLabel:SetSize(420, 22)
+    motdBodyEntry = vgui.Create("DTextEntry", motdBodyWrap)
+    motdBodyEntry:SetMultiline(true)
+    motdBodyEntry:SetFont("DermaDefault")
+    motdBodyEntry:SetPos(10, 32)
+    motdBodyWrap.PerformLayout = function(self, w, h)
+        motdBodyEntry:SetSize(math.max(100, w - 20), h - 42)
+    end
+
+    local saveMOTD = button(motdScroll, "Save MOTD", C.blue, function()
+        if not IsValid(motdTitleEntry) or not IsValid(motdBodyEntry) then return end
+        local titleText = string.Trim(motdTitleEntry:GetValue() or "")
+        local bodyText = motdBodyEntry:GetValue() or ""
+        if #bodyText > 8000 then notify("MOTD is too long (maximum 8000 characters).", false) return end
+        request("motd_save", function()
+            net.WriteString(titleText)
+            net.WriteString(bodyText)
+        end)
+    end, 38)
+    saveMOTD:Dock(TOP); saveMOTD:DockMargin(0, 0, 0, 6)
+
+    local previewMOTD = button(motdScroll, "Preview current editor text", C.panel2, function()
+        openMOTDViewer(IsValid(motdTitleEntry) and motdTitleEntry:GetValue() or "MOTD",
+            IsValid(motdBodyEntry) and motdBodyEntry:GetValue() or "")
+    end, 36)
+    previewMOTD:Dock(TOP); previewMOTD:DockMargin(0, 0, 0, 6)
+
+    local broadcastMOTD = button(motdScroll, "Show saved MOTD to everyone online", C.orange, function()
+        Derma_Query("Show the currently saved MOTD to every connected player?", "Broadcast MOTD",
+            "Show to everyone", function() request("motd_broadcast") end, "Cancel")
+    end, 36)
+    broadcastMOTD:Dock(TOP); broadcastMOTD:DockMargin(0, 0, 0, 14)
+
+    local rconHeader = label(motdScroll, "RCON / SERVER CONSOLE", "DermaDefaultBold", C.cyan)
+    rconHeader:Dock(TOP)
+    rconHeader:SetTall(28)
+    rconCommandEntry = addInput(motdScroll, "Console command", "status", "e.g. status, version, hostname")
+    rconArgsEntry = addInput(motdScroll, "Arguments (quotes keep words together)", "", 'e.g. "My server name"')
+    local rconHint = label(motdScroll,
+        "Superadmin only. Output is printed in the dedicated server console/logs. Script loaders, config loaders, password-changing RCON and shutdown commands are blocked.",
+        "DermaDefault", C.muted)
+    rconHint:Dock(TOP); rconHint:SetTall(38)
+    local runRCON = button(motdScroll, "Run server console command", C.red, function()
+        local command = string.Trim(IsValid(rconCommandEntry) and rconCommandEntry:GetValue() or "")
+        local args = IsValid(rconArgsEntry) and rconArgsEntry:GetValue() or ""
+        if command == "" then notify("Enter a console command name.", false) return end
+        if #command > 64 or not string.match(command, "^[%w_%.%-]+$") then
+            notify("Use one console command name without spaces.", false)
+            return
+        end
+        if #args > 512 then notify("Console arguments are too long.", false) return end
+        Derma_Query("Run '" .. command .. "' on the server? This may change live server behaviour.",
+            "Confirm server console command", "Run command",
+            function()
+                request("rcon", function()
+                    net.WriteString(command)
+                    net.WriteString(args)
+                end)
+            end,
+            "Cancel")
+    end, 38)
+    runRCON:Dock(TOP); runRCON:DockMargin(0, 0, 0, 12)
+
     -- Diagnostics
     local diagnostics = makePage("diagnostics")
     addSection(diagnostics, "Analytics & diagnostics", "Live server metrics, moderation totals and a rolling 60-minute history. History resets on server restart.")
@@ -1282,6 +1408,15 @@ net.Receive(NET, function()
     local kind = net.ReadString()
     if kind == "notice" then
         notify(net.ReadString(), net.ReadBool())
+        return
+    elseif kind == "motd_data" then
+        local titleText = net.ReadString()
+        local bodyText = net.ReadString()
+        if IsValid(motdTitleEntry) then motdTitleEntry:SetText(titleText) end
+        if IsValid(motdBodyEntry) then motdBodyEntry:SetText(bodyText) end
+        return
+    elseif kind == "motd_show" then
+        openMOTDViewer(net.ReadString(), net.ReadString())
         return
     end
     if kind ~= "snapshot" then return end
