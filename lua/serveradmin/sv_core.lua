@@ -364,16 +364,19 @@ local function loadStoredCustomJobs()
         return
     end
 
+    ServerAdmin.StoredCustomJobs = {}
     for _, raw in ipairs(records) do
         if #ServerAdmin.StoredCustomJobs >= MAX_CUSTOM_JOBS then break end
         local spec, err = normalizeJobSpec(raw)
         if spec then
+            -- Retain valid persisted entries even when a third-party job currently uses the same
+            -- command. Never rewrite the file just because one command is temporarily occupied.
+            ServerAdmin.StoredCustomJobs[#ServerAdmin.StoredCustomJobs + 1] = spec
             if not findJobByCommand(spec.command) then
                 local ok, id = pcall(DarkRP.createJob, spec.name, jobToDarkRP(spec))
                 if ok and isnumber(id) and istable(RPExtraTeams[id]) then
                     RPExtraTeams[id].ServerAdminCustom = true
                     ServerAdmin.CustomJobs[id] = spec
-                    ServerAdmin.StoredCustomJobs[#ServerAdmin.StoredCustomJobs + 1] = spec
                 else
                     ErrorNoHalt("[ServerAdmin] Could not load saved profession '" .. spec.name .. "': " .. jobClean(id, 160) .. "\n")
                 end
@@ -384,7 +387,6 @@ local function loadStoredCustomJobs()
             ErrorNoHalt("[ServerAdmin] Invalid saved profession skipped: " .. jobClean(err, 180) .. "\n")
         end
     end
-    persistCustomJobs()
     timer.Simple(2, function() sendCustomJobSync() end)
 end
 
