@@ -314,7 +314,8 @@ local function openJobEditor(mode, jobData)
     licenseCheck:SizeToContents()
     licenseCheck:SetPos(220, 8)
 
-    local colorButton = button(body, "Choose profession color", C.panel2, function()
+    local colorButton
+    colorButton = button(body, "Choose profession color", C.panel2, function()
         if not Derma_ColorRequest then
             notify("The color picker is unavailable in this client.", false)
             return
@@ -360,8 +361,8 @@ local function openJobEditor(mode, jobData)
     cancel:DockMargin(8, 8, 0, 0)
 
     local save = button(footer, editing and "Save changes" or "Create profession", C.blue, function()
-        local _, accessData = accessEntry:GetSelected()
-        local accessLevel = tonumber(accessData)
+        local accessIndex = accessEntry:GetSelectedID()
+        local accessLevel = accessIndex and tonumber(accessEntry:GetOptionData(accessIndex)) or nil
         if accessLevel == nil then
             local accessByName = {Everyone = 0, Administrators = 1, Superadmins = 2}
             accessLevel = accessByName[accessEntry:GetValue()] or 0
@@ -1008,6 +1009,75 @@ local function buildPanel()
     showPage(activePage or "overview")
     request("refresh")
 end
+
+local function applyClientCustomJobs(specs, attempt)
+    attempt = attempt or 0
+    if not istable(specs) then return end
+    if not istable(RPExtraTeams) then
+        if attempt < 12 then timer.Simple(1, function() applyClientCustomJobs(specs, attempt + 1) end) end
+        return
+    end
+
+    state.customJobs = {}
+    table.sort(specs, function(a, b) return (tonumber(a.id) or 0) < (tonumber(b.id) or 0) end)
+    for _, spec in ipairs(specs) do
+        local id = tonumber(spec.id)
+        if id and id > 0 and id < 65536 and isstring(spec.command) and istable(spec.models) and istable(spec.weapons) then
+            state.customJobs[id] = spec
+            local current = RPExtraTeams[id]
+            local compatible = not current or current.ServerAdminCustom == true or
+                string.lower(tostring(current.command or "")) == string.lower(spec.command)
+            if compatible then
+                if current and current.ServerAdminCustom and DarkRP and isfunction(DarkRP.removeFromCategory) then
+                    pcall(DarkRP.removeFromCategory, current, "jobs")
+                end
+
+                current = current or {}
+                current.name = tostring(spec.name or "Custom profession")
+                current.command = tostring(spec.command or "")
+                current.description = tostring(spec.description or "")
+                current.model = table.Copy(spec.models)
+                current.weapons = table.Copy(spec.weapons)
+                current.category = tostring(spec.category or "Custom")
+                current.salary = tonumber(spec.salary) or 0
+                current.max = tonumber(spec.max) or 0
+                current.admin = tonumber(spec.admin) or 0
+                current.vote = spec.vote == true
+                current.hasLicense = spec.hasLicense == true
+                current.color = Color(
+                    math.Clamp(tonumber(spec.r) or 40, 0, 255),
+                    math.Clamp(tonumber(spec.g) or 150, 0, 255),
+                    math.Clamp(tonumber(spec.b) or 220, 0, 255),
+                    255
+                )
+                current.ServerAdminCustom = true
+                RPExtraTeams[id] = current
+
+                if team and team.SetUp then team.SetUp(id, current.name, current.color) end
+                if DarkRP and isfunction(DarkRP.addToCategory) then
+                    pcall(DarkRP.addToCategory, current, "jobs", current.category)
+                end
+            else
+                ErrorNoHalt("[ServerAdmin] Custom profession sync skipped due to team ID mismatch at " .. tostring(id) .. ". Check that DarkRP job registration order matches between server and client.\n")
+            end
+        end
+    end
+
+    if DarkRP and isfunction(DarkRP.getF4MenuPanel) then
+        local ok, panel = pcall(DarkRP.getF4MenuPanel)
+        if ok and IsValid(panel) then panel:Remove() end
+    end
+end
+
+net.Receive("serveradmin_job_sync", function()
+    local payload = net.ReadString()
+    local specs = util.JSONToTable(payload or "")
+    if not istable(specs) then
+        ErrorNoHalt("[ServerAdmin] Received invalid custom profession sync payload.\n")
+        return
+    end
+    applyClientCustomJobs(specs)
+end)
 
 net.Receive(NET, function()
     local kind = net.ReadString()
