@@ -178,6 +178,226 @@ local function isDarkRP()
         string.find(string.lower(GAMEMODE.Name), "darkrp", 1, true) ~= nil)
 end
 
+local CUSTOM_JOBS_FILE = "serveradmin/custom_jobs.json"
+local MAX_CUSTOM_JOBS = 32
+ServerAdmin.CustomJobs = ServerAdmin.CustomJobs or {}
+ServerAdmin.StoredCustomJobs = ServerAdmin.StoredCustomJobs or {}
+ServerAdmin.CustomJobsLoaded = ServerAdmin.CustomJobsLoaded or false
+util.AddNetworkString("serveradmin_job_sync")
+file.CreateDir("serveradmin")
+
+local function jobClean(value, maxLength)
+    value = tostring(value or "")
+    value = string.gsub(value, "[%c]", " ")
+    value = string.Trim(value)
+    return string.sub(value, 1, maxLength or 120)
+end
+
+local function splitJobList(value, maxItems, maxLength, pattern)
+    local out, seen = {}, {}
+    value = tostring(value or "")
+    value = string.gsub(value, "\r", "\n")
+    for entry in string.gmatch(value .. ",", "(.-)[,\n]") do
+        entry = jobClean(entry, maxLength)
+        if entry ~= "" then
+            if #out >= maxItems then return nil, "Too many list entries." end
+            if not string.match(entry, pattern) then return nil, "Invalid list entry: " .. entry end
+            if not seen[string.lower(entry)] then
+                seen[string.lower(entry)] = true
+                out[#out + 1] = entry
+            end
+        end
+    end
+    return out
+end
+
+local function normalizeJobSpec(raw)
+    if not istable(raw) then return nil, "Invalid job data." end
+
+    local spec = {}
+    spec.name = jobClean(raw.name, 48)
+    spec.command = string.lower(jobClean(raw.command, 32))
+    spec.description = jobClean(raw.description, 500)
+    spec.category = jobClean(raw.category, 48)
+    spec.salary = tonumber(raw.salary)
+    spec.max = tonumber(raw.max)
+    spec.admin = tonumber(raw.admin)
+    spec.r, spec.g, spec.b = tonumber(raw.r), tonumber(raw.g), tonumber(raw.b)
+    spec.vote = raw.vote == true
+    spec.hasLicense = raw.hasLicense == true
+
+    if spec.name == "" or #spec.name < 2 then return nil, "Profession name must contain at least 2 characters." end
+    if not string.match(spec.command, "^[a-z][a-z0-9_]*$") then
+        return nil, "Command must start with a letter and contain only English letters, numbers and underscores."
+    end
+    if spec.category == "" then return nil, "Category cannot be empty." end
+    if #spec.description < 1 then return nil, "Description cannot be empty." end
+    if not spec.salary or spec.salary ~= spec.salary or spec.salary < 0 or spec.salary > 1000000 then
+        return nil, "Salary must be between 0 and 1000000."
+    end
+    if not spec.max or spec.max ~= spec.max or spec.max < 0 or spec.max > 255 then
+        return nil, "Player limit must be between 0 and 255 (0 means unlimited)."
+    end
+    if not spec.admin or spec.admin < 0 or spec.admin > 2 then return nil, "Invalid access level." end
+    if not spec.r or not spec.g or not spec.b then return nil, "Choose a profession color." end
+    for _, channel in ipairs({spec.r, spec.g, spec.b}) do
+        if channel ~= channel or channel < 0 or channel > 255 then return nil, "Color channels must be between 0 and 255." end
+    end
+    spec.salary, spec.max, spec.admin = math.floor(spec.salary), math.floor(spec.max), math.floor(spec.admin)
+    spec.r, spec.g, spec.b = math.floor(spec.r), math.floor(spec.g), math.floor(spec.b)
+
+    local modelsRaw = raw.modelText
+    if not isstring(modelsRaw) and istable(raw.models) then modelsRaw = table.concat(raw.models, ",") end
+    spec.models = splitJobList(modelsRaw, 4, 128, "^models/[%w_/%-%.]+%.mdl$")
+    if not spec.models then return nil, "Model list is invalid or contains more than 4 models." end
+    if #spec.models == 0 then return nil, "Add at least one model path." end
+    for _, modelPath in ipairs(spec.models) do
+        if string.find(modelPath, "..", 1, true) or not file.Exists(modelPath, "GAME") then
+            return nil, "Model was not found on the mounted server: " .. modelPath
+        end
+    end
+
+    local weaponsRaw = raw.weaponsText
+    if not isstring(weaponsRaw) and istable(raw.weapons) then weaponsRaw = table.concat(raw.weapons, ",") end
+    spec.weapons = splitJobList(weaponsRaw, 8, 48, "^[%w_%-]+$")
+    if not spec.weapons then return nil, "Weapon list is invalid or contains more than 8 weapon classes." end
+
+    return spec
+end
+
+local function findJobByCommand(command, exceptID)
+    if not istable(RPExtraTeams) then return nil end
+    for id, job in pairs(RPExtraTeams) do
+        if isnumber(id) and id ~= exceptID and istable(job) and
+            string.lower(tostring(job.command or "")) == string.lower(command or "") then
+            return id, job
+        end
+    end
+end
+
+local function findStoredIndex(command)
+    for index, spec in ipairs(ServerAdmin.StoredCustomJobs) do
+        if string.lower(tostring(spec.command or "")) == string.lower(tostring(command or "")) then return index end
+    end
+end
+
+local function persistCustomJobs()
+    file.CreateDir("serveradmin")
+    local payload = util.TableToJSON(ServerAdmin.StoredCustomJobs or {}, true)
+    if not isstring(payload) then return false end
+    file.Write(CUSTOM_JOBS_FILE, payload)
+    return true
+end
+
+local function jobToDarkRP(spec)
+    return {
+        color = Color(spec.r, spec.g, spec.b, 255),
+        model = table.Copy(spec.models),
+        description = spec.description,
+        weapons = table.Copy(spec.weapons),
+        command = spec.command,
+        max = spec.max,
+        salary = spec.salary,
+        admin = spec.admin,
+        vote = spec.vote,
+        hasLicense = spec.hasLicense,
+        category = spec.category,
+        ServerAdminCustom = true
+    }
+end
+
+local function sendCustomJobSync(recipient)
+    local specs = {}
+    for id, spec in pairs(ServerAdmin.CustomJobs) do
+        local copy = table.Copy(spec)
+        copy.id = id
+        specs[#specs + 1] = copy
+    end
+    table.sort(specs, function(a, b) return (a.id or 0) < (b.id or 0) end)
+    local payload = util.TableToJSON(specs, false) or "[]"
+    if #payload > 60000 then
+        ErrorNoHalt("[ServerAdmin] Custom job sync payload exceeds safe network limit.\n")
+        return
+    end
+    net.Start("serveradmin_job_sync")
+        net.WriteString(payload)
+    if IsValid(recipient) then net.Send(recipient) else net.Broadcast() end
+end
+
+local function applyEditedJob(jobID, spec)
+    local job = RPExtraTeams[jobID]
+    if not istable(job) then return false, "The selected DarkRP profession no longer exists." end
+
+    if DarkRP and isfunction(DarkRP.removeFromCategory) then
+        pcall(DarkRP.removeFromCategory, job, "jobs")
+    end
+
+    job.name = spec.name
+    job.color = Color(spec.r, spec.g, spec.b, 255)
+    job.model = table.Copy(spec.models)
+    job.description = spec.description
+    job.weapons = table.Copy(spec.weapons)
+    job.max = spec.max
+    job.salary = spec.salary
+    job.admin = spec.admin
+    job.vote = spec.vote
+    job.hasLicense = spec.hasLicense
+    job.category = spec.category
+    job.ServerAdminCustom = true
+
+    if team and team.SetUp then team.SetUp(jobID, job.name, job.color) end
+    if DarkRP and isfunction(DarkRP.addToCategory) then
+        pcall(DarkRP.addToCategory, job, "jobs", job.category)
+    end
+    for _, modelPath in ipairs(spec.models) do util.PrecacheModel(modelPath) end
+    return true
+end
+
+local function loadStoredCustomJobs()
+    if ServerAdmin.CustomJobsLoaded or not isDarkRP() or not isfunction(DarkRP.createJob) or
+        not istable(RPExtraTeams) or #RPExtraTeams < 1 or DarkRP.DARKRP_LOADING then return end
+
+    ServerAdmin.CustomJobsLoaded = true
+    local payload = file.Read(CUSTOM_JOBS_FILE, "DATA")
+    local records = payload and util.JSONToTable(payload) or {}
+    if not istable(records) then
+        ErrorNoHalt("[ServerAdmin] Could not parse " .. CUSTOM_JOBS_FILE .. "; stored professions were ignored.\n")
+        return
+    end
+
+    for _, raw in ipairs(records) do
+        if #ServerAdmin.StoredCustomJobs >= MAX_CUSTOM_JOBS then break end
+        local spec, err = normalizeJobSpec(raw)
+        if spec then
+            if not findJobByCommand(spec.command) then
+                local ok, id = pcall(DarkRP.createJob, spec.name, jobToDarkRP(spec))
+                if ok and isnumber(id) and istable(RPExtraTeams[id]) then
+                    RPExtraTeams[id].ServerAdminCustom = true
+                    ServerAdmin.CustomJobs[id] = spec
+                    ServerAdmin.StoredCustomJobs[#ServerAdmin.StoredCustomJobs + 1] = spec
+                else
+                    ErrorNoHalt("[ServerAdmin] Could not load saved profession '" .. spec.name .. "': " .. jobClean(id, 160) .. "\n")
+                end
+            else
+                ErrorNoHalt("[ServerAdmin] Skipped saved profession '" .. spec.name .. "' because command '/" .. spec.command .. "' is already registered.\n")
+            end
+        else
+            ErrorNoHalt("[ServerAdmin] Invalid saved profession skipped: " .. jobClean(err, 180) .. "\n")
+        end
+    end
+    persistCustomJobs()
+    timer.Simple(2, function() sendCustomJobSync() end)
+end
+
+hook.Add("DarkRPFinishedLoading", "ServerAdmin_LoadCustomJobs", loadStoredCustomJobs)
+timer.Create("ServerAdmin_WaitForDarkRPJobs", 1, 90, function()
+    if ServerAdmin.CustomJobsLoaded then timer.Remove("ServerAdmin_WaitForDarkRPJobs") return end
+    if isDarkRP() and isfunction(DarkRP.createJob) and istable(RPExtraTeams) and #RPExtraTeams > 0 and not DarkRP.DARKRP_LOADING then
+        loadStoredCustomJobs()
+        if ServerAdmin.CustomJobsLoaded then timer.Remove("ServerAdmin_WaitForDarkRPJobs") end
+    end
+end)
+
 local function idForPlayer(ply)
     if not IsValid(ply) then return "" end
     return cleanText(ply:SteamID64() or "", 32)
@@ -339,9 +559,11 @@ local function sendSnapshot(ply)
         net.WriteUInt(math.Clamp(botCount, 0, 255), 8)
         net.WriteUInt(math.Clamp(#entities, 0, 65535), 16)
     net.Send(ply)
+    sendCustomJobSync(ply)
 end
 
 local SUPERADMIN_ACTIONS = {
+    job_create = true, job_edit = true,
     hostname = true, gravity = true, map = true, setmoney = true, addmoney = true, setjob = true,
     unban = true, setcvar = true, botadd = true, botkickall = true, announce = true,
     cleanup = true, lockdown = true, sethealth = true, setarmor = true
@@ -380,7 +602,78 @@ local function runAction(ply, action)
         return
     end
 
-    if action == "hostname" then
+    if action == "job_create" or action == "job_edit" then
+        if not isDarkRP() or not isfunction(DarkRP.createJob) or not istable(RPExtraTeams) then
+            sendNotice(ply, false, "DarkRP job API is unavailable.")
+            return
+        end
+
+        local jobID
+        if action == "job_edit" then jobID = net.ReadUInt(16) end
+        local payload = net.ReadString()
+        if not isstring(payload) or #payload > 12000 then
+            sendNotice(ply, false, "Profession data is too large.")
+            return
+        end
+        local raw = util.JSONToTable(payload)
+        if not istable(raw) then sendNotice(ply, false, "Profession data could not be parsed.") return end
+
+        local oldSpec
+        if action == "job_edit" then
+            oldSpec = ServerAdmin.CustomJobs[jobID]
+            if not oldSpec or not istable(RPExtraTeams[jobID]) or not RPExtraTeams[jobID].ServerAdminCustom then
+                sendNotice(ply, false, "Only professions created by ServerAdmin can be edited here.")
+                return
+            end
+            -- The chat command is tied to DarkRP's internal command registry and is immutable after creation.
+            raw.command = oldSpec.command
+        elseif #ServerAdmin.StoredCustomJobs >= MAX_CUSTOM_JOBS then
+            sendNotice(ply, false, "Custom profession limit reached (32).")
+            return
+        end
+
+        local spec, err = normalizeJobSpec(raw)
+        if not spec then sendNotice(ply, false, err or "Invalid profession data.") return end
+        local existingID = findJobByCommand(spec.command, action == "job_edit" and jobID or nil)
+        if existingID then
+            sendNotice(ply, false, "This command is already used by profession ID " .. tostring(existingID) .. ".")
+            return
+        end
+
+        if action == "job_create" then
+            local ok, newID = pcall(DarkRP.createJob, spec.name, jobToDarkRP(spec))
+            if not ok or not isnumber(newID) or not istable(RPExtraTeams[newID]) then
+                ErrorNoHalt("[ServerAdmin] DarkRP.createJob failed: " .. jobClean(newID, 180) .. "\n")
+                sendNotice(ply, false, "DarkRP rejected the profession. Check the server console.")
+                return
+            end
+            RPExtraTeams[newID].ServerAdminCustom = true
+            ServerAdmin.CustomJobs[newID] = spec
+            ServerAdmin.StoredCustomJobs[#ServerAdmin.StoredCustomJobs + 1] = spec
+            persistCustomJobs()
+            audit(ply, "custom DarkRP profession created", nil, spec.name .. " (/" .. spec.command .. ")")
+            sendNotice(ply, true, "Profession '" .. spec.name .. "' created and saved.")
+        else
+            local ok, editError = applyEditedJob(jobID, spec)
+            if not ok then sendNotice(ply, false, editError) return end
+            ServerAdmin.CustomJobs[jobID] = spec
+            local storedIndex = findStoredIndex(oldSpec.command)
+            if storedIndex then ServerAdmin.StoredCustomJobs[storedIndex] = spec end
+            if not persistCustomJobs() then
+                sendNotice(ply, false, "Profession changed in memory, but the JSON file could not be saved.")
+                return
+            end
+            audit(ply, "custom DarkRP profession edited", nil, spec.name .. " (/" .. spec.command .. ")")
+            sendNotice(ply, true, "Profession '" .. spec.name .. "' updated and saved.")
+        end
+
+        timer.Simple(0.5, function()
+            sendCustomJobSync()
+            for _, admin in ipairs(player.GetAll()) do
+                if isAdmin(admin) then sendSnapshot(admin) end
+            end
+        end)
+    elseif action == "hostname" then
         local hostname = cleanText(net.ReadString(), 100)
         if hostname == "" then sendNotice(ply, false, "Hostname cannot be empty.") return end
         RunConsoleCommand("hostname", hostname)
@@ -607,6 +900,12 @@ end
 hook.Add("PlayerDisconnected", "ServerAdmin_ClearRuntimeFlags", function(ply)
     local id = idForPlayer(ply)
     Frozen[id], Muted[id], Gagged[id], GodMode[id] = nil, nil, nil, nil
+end)
+
+hook.Add("PlayerInitialSpawn", "ServerAdmin_SyncCustomJobs", function(ply)
+    timer.Simple(10, function()
+        if IsValid(ply) then sendCustomJobSync(ply) end
+    end)
 end)
 
 hook.Add("PlayerInitialSpawn", "ServerAdmin_AdminHint", function(ply)
