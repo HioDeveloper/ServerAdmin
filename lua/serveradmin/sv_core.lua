@@ -241,7 +241,7 @@ local function sendSnapshot(ply)
         end
         table.sort(jobs, function(a, b) return a.id < b.id end)
     end
-    local logs, bans, warnings = getRecentLogs(40), getBans(50), getWarnings(50)
+    local logs, bans, warnings = getRecentLogs(20), getBans(25), getWarnings(25)
     local entities = ents.GetAll()
     local botCount = 0
     for _, target in ipairs(players) do if target:IsBot() then botCount = botCount + 1 end end
@@ -286,8 +286,8 @@ local function sendSnapshot(ply)
             net.WriteBool(GodMode[idForPlayer(target)] == true)
         end
 
-        net.WriteUInt(math.min(#jobs, 1023), 10)
-        for i = 1, math.min(#jobs, 1023) do
+        net.WriteUInt(math.min(#jobs, 255), 10)
+        for i = 1, math.min(#jobs, 255) do
             local job = jobs[i]
             net.WriteUInt(job.id, 16)
             net.WriteString(job.name)
