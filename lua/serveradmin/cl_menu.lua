@@ -472,7 +472,7 @@ local function buildPanel()
         self.serveradminBansSignature = signature
         self:Clear()
         for _, b in ipairs(state.bans) do
-            local active = b.active and not (b.expires > 0 and b.expires <= os.time())
+            local active = b.active
             local expires = not active and "—" or (b.expires == 0 and "Permanent" or os.date("%Y-%m-%d %H:%M", b.expires))
             local line = self:AddLine(active and "ACTIVE" or "Expired", b.name, b.steamid, b.reason, b.actor, expires)
             line.serveradminBanID = b.id
