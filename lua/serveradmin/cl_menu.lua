@@ -771,6 +771,29 @@ local function buildPanel()
     end, 36)
     editJobButton:SetPos(168, 8); editJobButton:SetSize(145, 36)
 
+    local deleteJobButton = button(jobActions, "Delete selected", C.red, function()
+        if not LocalPlayer():IsSuperAdmin() then notify("Only superadmins can delete professions.", false) return end
+        if not selectedJob then notify("Select a profession first.", false) return end
+        local custom = state.customJobs[selectedJob]
+        if not custom then
+            notify("Only ServerAdmin-created professions can be deleted.", false)
+            return
+        end
+
+        Derma_Query(
+            "Permanently delete custom profession '" .. tostring(custom.name or "Unknown") ..
+                "' (/" .. tostring(custom.command or "") .. ")? Players currently using it will be moved to a fallback profession.",
+            "Delete custom profession",
+            "Delete profession",
+            function()
+                request("job_delete", function() net.WriteUInt(tonumber(selectedJob) or 0, 16) end)
+                selectedJob = nil
+            end,
+            "Cancel"
+        )
+    end, 36)
+    deleteJobButton:SetPos(550, 8); deleteJobButton:SetSize(135, 36)
+
     local jobTarget = button(jobActions, "Assign to selected player", C.panel2, function()
         local p = selectedPlayer()
         if not p then notify("Select a player on the Players page first.", false) return end
@@ -851,8 +874,28 @@ local function buildPanel()
     -- Audit log
     local logsPage = makePage("logs")
     addSection(logsPage, "Audit logs", "Server-side records of actions and configuration changes.")
-    local logsRefresh = button(logsPage, "Refresh logs", C.blue, function() request("refresh") end)
-    logsRefresh:Dock(TOP); logsRefresh:DockMargin(0, 8, 0, 10); logsRefresh:SetWide(130)
+    local logActions = vgui.Create("DPanel", logsPage)
+    logActions:Dock(TOP); logActions:SetTall(42); logActions:DockMargin(0, 8, 0, 8)
+    logActions.Paint = nil
+
+    local logsRefresh = button(logActions, "Refresh logs", C.blue, function() request("refresh") end)
+    logsRefresh:SetPos(0, 3); logsRefresh:SetSize(130, 34)
+
+    local clearLogs = button(logActions, "Clear all logs", C.red, function()
+        if not LocalPlayer():IsSuperAdmin() then
+            notify("Only superadmins can clear audit logs.", false)
+            return
+        end
+        Derma_Query(
+            "This permanently deletes all ServerAdmin audit log entries. Ban and warning records will not be affected.",
+            "Clear audit logs",
+            "Clear logs",
+            function() request("clearlogs") end,
+            "Cancel"
+        )
+    end)
+    clearLogs:SetPos(140, 3); clearLogs:SetSize(150, 34)
+
     local logList = vgui.Create("DListView", logsPage)
     logList:Dock(FILL)
     logList:AddColumn("Time"):SetFixedWidth(150)
@@ -1016,6 +1059,8 @@ local function buildPanel()
     request("refresh")
 end
 
+local syncedCustomJobCommands = {}
+
 local function applyClientCustomJobs(specs, attempt)
     attempt = attempt or 0
     if not istable(specs) then return end
@@ -1024,6 +1069,34 @@ local function applyClientCustomJobs(specs, attempt)
             timer.Simple(1, function() applyClientCustomJobs(specs, attempt + 1) end)
         end
         return
+    end
+
+    local incoming = {}
+    for _, spec in ipairs(specs) do
+        local id = istable(spec) and tonumber(spec.id) or nil
+        if id and id > 0 and id < 65536 and isstring(spec.command) then
+            incoming[id] = spec.command
+        end
+    end
+
+    -- If the server removed a custom job, remove only the exact job this client previously
+    -- registered via DarkRP's API. Never delete or replace an unrelated job by team ID alone.
+    for id, oldCommand in pairs(syncedCustomJobCommands) do
+        if not incoming[id] then
+            local current = RPExtraTeams[id]
+            if current and current.ServerAdminCustom == true and
+                tostring(current.command or "") == tostring(oldCommand) and isfunction(DarkRP.removeJob) then
+                local ok, removeError = pcall(DarkRP.removeJob, id)
+                if not istable(RPExtraTeams[id]) then
+                    syncedCustomJobCommands[id] = nil
+                else
+                    ErrorNoHalt("[ServerAdmin] Could not remove synced custom profession ID " ..
+                        tostring(id) .. ": " .. tostring(removeError) .. "\\n")
+                end
+            else
+                syncedCustomJobCommands[id] = nil
+            end
+        end
     end
 
     state.customJobs = {}
@@ -1036,19 +1109,18 @@ local function applyClientCustomJobs(specs, attempt)
 
             local current = RPExtraTeams[id]
             if current and tostring(current.command or "") == tostring(spec.command) then
-                -- The job already exists locally; never rewrite a registered DarkRP team.
+                -- The job already exists locally; do not rewrite DarkRP's registered team.
                 current.ServerAdminCustom = true
+                syncedCustomJobCommands[id] = spec.command
             elseif current then
-                -- Another job occupies this ID on this client. Do not overwrite DarkRP's registry.
+                -- Another profession occupies this ID. Never overwrite it.
                 ErrorNoHalt("[ServerAdmin] Skipped client registration for '" ..
                     tostring(spec.name or spec.command) .. "': team ID " .. tostring(id) ..
-                    " is occupied by '" .. tostring(current.name or current.command or "unknown") .. "'.\n")
+                    " is occupied by '" .. tostring(current.name or current.command or "unknown") .. "'.\\n")
             elseif #RPExtraTeams + 1 ~= id then
-                -- DarkRP assigns sequential team IDs. Register only when this client's next ID
-                -- matches the server ID, otherwise the F4 menu could map the wrong profession.
                 ErrorNoHalt("[ServerAdmin] Skipped client registration for '" ..
                     tostring(spec.name or spec.command) .. "': local team order does not match server ID " ..
-                    tostring(id) .. ".\n")
+                    tostring(id) .. ".\\n")
             else
                 local categories
                 if isfunction(DarkRP.getCategories) then
@@ -1083,11 +1155,13 @@ local function applyClientCustomJobs(specs, attempt)
                 }
 
                 local ok, createdID = pcall(DarkRP.createJob, tostring(spec.name or "Custom profession"), jobData)
-                if ok and tonumber(createdID) == id and istable(RPExtraTeams[id]) then
+                if ok and tonumber(createdID) == id and istable(RPExtraTeams[id]) and
+                    tostring(RPExtraTeams[id].command or "") == tostring(spec.command) then
                     RPExtraTeams[id].ServerAdminCustom = true
+                    syncedCustomJobCommands[id] = spec.command
                 else
                     ErrorNoHalt("[ServerAdmin] Could not safely register client profession '" ..
-                        tostring(spec.name or spec.command) .. "': " .. tostring(createdID) .. "\n")
+                        tostring(spec.name or spec.command) .. "': " .. tostring(createdID) .. "\\n")
                 end
             end
         end
