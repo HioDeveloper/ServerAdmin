@@ -316,6 +316,23 @@ local function hasJobCategory(category)
     return false
 end
 
+local function findFallbackJobID(exceptID)
+    local defaultID = tonumber(GAMEMODE and GAMEMODE.DefaultTeam) or tonumber(TEAM_CITIZEN)
+    if defaultID and defaultID ~= exceptID and istable(RPExtraTeams[defaultID]) then
+        return defaultID
+    end
+
+    local candidates = {}
+    for id, job in pairs(RPExtraTeams or {}) do
+        if isnumber(id) and id ~= exceptID and istable(job) and
+            job.ServerAdminCustom ~= true and tonumber(job.admin or 0) == 0 then
+            candidates[#candidates + 1] = id
+        end
+    end
+    table.sort(candidates)
+    return candidates[1]
+end
+
 local function persistCustomJobs()
     file.CreateDir("serveradmin")
     local payload = util.TableToJSON(ServerAdmin.StoredCustomJobs or {}, true)
@@ -638,7 +655,8 @@ local SUPERADMIN_ACTIONS = {
     job_create = true, job_edit = true,
     hostname = true, gravity = true, map = true, setmoney = true, addmoney = true, setjob = true,
     unban = true, setcvar = true, botadd = true, botkickall = true, announce = true,
-    cleanup = true, lockdown = true, sethealth = true, setarmor = true
+    cleanup = true, lockdown = true, sethealth = true, setarmor = true,
+    job_delete = true, clearlogs = true
 }
 local TARGET_ACTIONS = {
     kick = true, ban = true, warn = true, freeze = true, unfreeze = true, slay = true,
@@ -748,6 +766,74 @@ local function runAction(ply, action)
                 if isAdmin(admin) then sendSnapshot(admin) end
             end
         end)
+    elseif action == "job_delete" then
+        if not isDarkRP() or not hasDarkRPJobAPI() or not isfunction(DarkRP.removeJob) then
+            sendNotice(ply, false, "DarkRP profession removal API is unavailable.")
+            return
+        end
+
+        local jobID = net.ReadUInt(16)
+        local spec = ServerAdmin.CustomJobs[jobID]
+        local job = RPExtraTeams[jobID]
+        if not spec or not istable(job) or job.ServerAdminCustom ~= true or
+            tostring(job.command or "") ~= tostring(spec.command or "") then
+            sendNotice(ply, false, "Only a profession created by ServerAdmin can be deleted.")
+            return
+        end
+
+        local occupants = {}
+        for _, target in ipairs(player.GetAll()) do
+            if target:Team() == jobID then occupants[#occupants + 1] = target end
+        end
+        local fallbackID = #occupants > 0 and findFallbackJobID(jobID) or nil
+        if #occupants > 0 and not fallbackID then
+            sendNotice(ply, false, "Cannot delete this profession while players use it: no safe fallback profession was found.")
+            return
+        end
+        for _, target in ipairs(occupants) do
+            if not isfunction(target.changeTeam) then
+                sendNotice(ply, false, "Could not move players out of this profession because DarkRP job switching is unavailable.")
+                return
+            end
+        end
+        for _, target in ipairs(occupants) do
+            local ok, changeError = pcall(target.changeTeam, target, fallbackID, true, true)
+            if not ok or not IsValid(target) or target:Team() ~= fallbackID then
+                sendNotice(ply, false, "Could not move every player to the fallback profession. Deletion cancelled.")
+                ErrorNoHalt("[ServerAdmin] Failed to move player from profession " .. tostring(jobID) .. ": " .. jobClean(changeError, 120) .. "\n")
+                return
+            end
+        end
+
+        local removed, removeError = pcall(DarkRP.removeJob, jobID)
+        if istable(RPExtraTeams[jobID]) then
+            sendNotice(ply, false, "DarkRP did not remove the profession. Check the server console.")
+            ErrorNoHalt("[ServerAdmin] DarkRP.removeJob failed for ID " .. tostring(jobID) .. ": " .. jobClean(removeError, 180) .. "\n")
+            return
+        end
+
+        ServerAdmin.CustomJobs[jobID] = nil
+        local storedIndex = findStoredIndex(spec.command)
+        if storedIndex then table.remove(ServerAdmin.StoredCustomJobs, storedIndex) end
+        persistCustomJobs()
+        audit(ply, "custom DarkRP profession deleted", nil, spec.name .. " (/" .. spec.command .. ", ID " .. tostring(jobID) .. ")")
+        sendNotice(ply, true, "Profession '" .. jobClean(spec.name, 64) .. "' deleted.")
+
+        if not removed then
+            ErrorNoHalt("[ServerAdmin] DarkRP removed profession " .. tostring(jobID) .. " but reported an error in a removal hook: " .. jobClean(removeError, 180) .. "\n")
+        end
+        timer.Simple(0.5, function()
+            sendCustomJobSync()
+            for _, admin in ipairs(player.GetAll()) do
+                if isAdmin(admin) then sendSnapshot(admin) end
+            end
+        end)
+    elseif action == "clearlogs" then
+        ensureTables()
+        sql.Query("DELETE FROM serveradmin_audit")
+        sendNotice(ply, true, "ServerAdmin audit logs cleared.")
+        -- Do not write an audit entry for the clear operation itself; that would immediately
+        -- repopulate the history the administrator just cleared.
     elseif action == "hostname" then
         local hostname = cleanText(net.ReadString(), 100)
         if hostname == "" then sendNotice(ply, false, "Hostname cannot be empty.") return end
