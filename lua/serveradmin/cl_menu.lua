@@ -611,6 +611,7 @@ local function buildPanel()
     cvarList:SetDataHeight(22)
     cvarList.Paint = function(self, w, h) rounded(0, 0, w, h, C.bg, 7) end
     local selectedCvar
+    local cvarEntry, cvarHint
     cvarList.OnRowSelected = function(_, _, line)
         selectedCvar = line.serveradminCVar
         for _, cv in ipairs(state.cvars) do
@@ -635,8 +636,8 @@ local function buildPanel()
             line.serveradminCVar = cv.name
         end
     end
-    local cvarEntry = addInput(serverPage, "New value for selected variable", "", "Select a variable above")
-    local cvarHint = label(serverPage, "Select an item to edit it. Secret values are never disclosed.", "DermaDefault", C.muted)
+    cvarEntry = addInput(serverPage, "New value for selected variable", "", "Select a variable above")
+    cvarHint = label(serverPage, "Select an item to edit it. Secret values are never disclosed.", "DermaDefault", C.muted)
     cvarHint:Dock(TOP); cvarHint:SetTall(24)
     local saveCvar = button(serverPage, "Apply selected variable", C.blue, function()
         if not selectedCvar then notify("Select a server variable first.", false) return end
