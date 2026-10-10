@@ -60,6 +60,76 @@ local function button(parent, text, color, callback, tall)
     return item
 end
 
+
+local function styleListLine(list, line)
+    if not IsValid(line) then return end
+
+    line.Paint = function(row, w, h)
+        local fill
+        if row:IsLineSelected() then
+            fill = Color(73, 117, 255, 100)
+        elseif row:GetAltLine() then
+            fill = Color(31, 39, 53, 245)
+        else
+            fill = Color(22, 28, 39, 245)
+        end
+        draw.RoundedBox(4, 1, 1, w - 2, h - 2, fill)
+        if row:IsLineSelected() then
+            surface.SetDrawColor(C.cyan)
+            surface.DrawRect(1, 5, 3, h - 10)
+        elseif row:IsHovered() then
+            surface.SetDrawColor(C.border)
+            surface.DrawOutlinedRect(1, 1, w - 2, h - 2, 1)
+        end
+    end
+
+    for index = 1, #(list.Columns or {}) do
+        local cell = line:SetValue(index, line:GetColumnText(index))
+        if IsValid(cell) then
+            cell:SetTextColor(C.text)
+            cell:SetFont("DermaDefault")
+            cell:SetContentAlignment(4)
+        end
+    end
+end
+
+local function styleListView(list)
+    if not IsValid(list) then return end
+    list:SetHeaderHeight(30)
+    list:SetDataHeight(27)
+    list:SetMultiSelect(false)
+    list:SetSortable(true)
+    list.Paint = function(self, w, h)
+        draw.RoundedBox(8, 0, 0, w, h, C.bg)
+        surface.SetDrawColor(C.border)
+        surface.DrawOutlinedRect(0, 0, w, h, 1)
+    end
+
+    for _, column in ipairs(list.Columns or {}) do
+        local header = column.Header
+        if IsValid(header) then
+            header:SetTextColor(C.text)
+            header:SetFont("DermaDefaultBold")
+            header.Paint = function(self, w, h)
+                draw.RoundedBox(4, 2, 2, w - 4, h - 4, C.panel2)
+                draw.SimpleText(self:GetText() or "", "DermaDefaultBold", 9, h / 2,
+                    C.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+            end
+        end
+    end
+
+    local originalAddLine = list.AddLine
+    list.AddLine = function(self, ...)
+        local line = originalAddLine(self, ...)
+        styleListLine(self, line)
+        return line
+    end
+
+    for _, line in ipairs(list:GetLines()) do
+        styleListLine(list, line)
+    end
+end
+
 local function selectedPlayer()
     for _, ply in ipairs(state.players) do
         if ply.userid == selectedUserID then return ply end
@@ -279,6 +349,7 @@ local function buildPanel()
     online:AddColumn("Money"):SetFixedWidth(110)
     online:AddColumn("Ping")
     online:SetDataHeight(25)
+    styleListView(online)
     online.Paint = function(self, w, h) rounded(0, 0, w, h, C.bg, 7) end
     online.Think = function(self)
         if self.serveradminRefresh and self.serveradminRefresh > CurTime() then return end
@@ -312,11 +383,51 @@ local function buildPanel()
     playerList:AddColumn("SteamID"):SetFixedWidth(135)
     playerList:AddColumn("Rank")
     playerList:SetMultiSelect(false); playerList:SetDataHeight(24)
+    styleListView(playerList)
     playerList.OnRowSelected = function(_, _, line) selectedUserID = line.serveradminUserID end
     playerList.Paint = function(self, w, h) rounded(0, 0, w, h, C.bg, 7) end
 
+    local selectedCard = vgui.Create("DPanel", playersPage)
+    selectedCard:Dock(BOTTOM)
+    selectedCard:SetTall(72)
+    selectedCard:DockMargin(0, 8, 0, 0)
+    selectedCard.Paint = function(self, w, h)
+        rounded(0, 0, w, h, C.panel2, 9)
+        surface.SetDrawColor(C.blue)
+        surface.DrawRect(0, 8, 3, h - 16)
+        local p = selectedPlayer()
+        if not p then
+            draw.SimpleText("NO PLAYER SELECTED", "DermaDefaultBold", 16, 23, C.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+            draw.SimpleText("Select a row above to view player details and enable the actions below.", "DermaDefault", 16, 47, C.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+            return
+        end
+
+        draw.SimpleText(p.name or "Unknown player", "DermaLarge", 16, 23, C.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+        draw.SimpleText((p.role or "Player") .. "  /  " .. (p.team or "Unknown team") .. "  /  " .. (p.steamid or "Unknown SteamID"),
+            "DermaDefault", 18, 49, C.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+
+        local status = (p.alive and "ALIVE" or "DEAD") ..
+            "  •  HP " .. tostring(p.health or 0) ..
+            "  •  ARMOR " .. tostring(p.armor or 0) ..
+            "  •  PING " .. tostring(p.ping or 0) .. " ms"
+        draw.SimpleText(status, "DermaDefaultBold", w - 16, 22,
+            p.alive and C.green or C.orange, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
+
+        local flags = {}
+        if p.muted then flags[#flags + 1] = "VOICE MUTED" end
+        if p.gagged then flags[#flags + 1] = "CHAT GAG" end
+        if p.frozen then flags[#flags + 1] = "FROZEN" end
+        if p.god then flags[#flags + 1] = "GOD MODE" end
+        draw.SimpleText(#flags > 0 and table.concat(flags, "  /  ") or "No active moderation flags",
+            "DermaDefault", w - 16, 48, #flags > 0 and C.orange or C.muted, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
+    end
+
     local actionBar = vgui.Create("DPanel", playersPage)
-    actionBar:Dock(BOTTOM); actionBar:SetTall(158); actionBar:DockMargin(0, 10, 0, 0); actionBar.Paint = nil
+    actionBar:Dock(BOTTOM); actionBar:SetTall(158); actionBar:DockMargin(0, 10, 0, 0)
+    actionBar.Paint = function(self, w, h)
+        surface.SetDrawColor(C.border)
+        surface.DrawRect(0, 0, w, 1)
+    end
     local function actionButton(text, x, y, w, color, fn)
         local b = button(actionBar, text, color, fn, 32); b:SetPos(x, y); b:SetSize(w, 32); return b
     end
@@ -422,6 +533,7 @@ local function buildPanel()
     jobList:AddColumn("Command"):SetFixedWidth(120)
     jobList:AddColumn("Salary")
     jobList:SetDataHeight(25)
+    styleListView(jobList)
     jobList.Paint = function(self, w, h) rounded(0, 0, w, h, C.bg, 7) end
     jobList.OnRowSelected = function(_, _, line) selectedJob = line.serveradminJobID end
     jobList.Think = function(self)
@@ -462,6 +574,7 @@ local function buildPanel()
     banList:AddColumn("By"):SetFixedWidth(140)
     banList:AddColumn("Expires")
     banList:SetDataHeight(24)
+    styleListView(banList)
     banList.Paint = function(self, w, h) rounded(0, 0, w, h, C.bg, 7) end
     local selectedBanID
     banList.OnRowSelected = function(_, _, line) selectedBanID = line.serveradminBanID end
@@ -500,6 +613,7 @@ local function buildPanel()
     warningList:AddColumn("Warning"):SetFixedWidth(250)
     warningList:AddColumn("Administrator")
     warningList:SetDataHeight(24)
+    styleListView(warningList)
     warningList.Paint = function(self, w, h) rounded(0, 0, w, h, C.bg, 7) end
     warningList.Think = function(self)
         local signature = ""
@@ -524,6 +638,7 @@ local function buildPanel()
     logList:AddColumn("Target"):SetFixedWidth(170)
     logList:AddColumn("Details")
     logList:SetDataHeight(25)
+    styleListView(logList)
     logList.Paint = function(self, w, h) rounded(0, 0, w, h, C.bg, 7) end
     logList.Think = function(self)
         local signature = ""
@@ -609,6 +724,7 @@ local function buildPanel()
     cvarList:AddColumn("Current value"):SetFixedWidth(180)
     cvarList:AddColumn("Type")
     cvarList:SetDataHeight(22)
+    styleListView(cvarList)
     cvarList.Paint = function(self, w, h) rounded(0, 0, w, h, C.bg, 7) end
     local selectedCvar
     local cvarEntry, cvarHint
