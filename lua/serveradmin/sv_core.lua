@@ -101,6 +101,7 @@ end
 
 local function getBans(limit)
     ensureTables()
+    sql.Query("UPDATE serveradmin_bans SET active = 0 WHERE active = 1 AND expires > 0 AND expires <= " .. tostring(os.time()))
     local rows = sql.Query("SELECT id, steamid, steamid64, name, reason, actor, created, expires, active FROM serveradmin_bans ORDER BY id DESC LIMIT " ..
         tostring(math.Clamp(math.floor(tonumber(limit) or 50), 1, 63)))
     if not istable(rows) then return {} end
@@ -444,7 +445,7 @@ local function runAction(ply, action)
         audit(ply, "server announcement", nil, message)
         sendNotice(ply, true, "Announcement sent to all players.")
     elseif action == "cleanup" then
-        game.CleanUpMap(false, true)
+        game.CleanUpMap(false, {})
         audit(ply, "map cleanup", nil, "Admin cleanup executed")
         sendNotice(ply, true, "Map cleanup requested.")
     elseif action == "lockdown" then
@@ -587,6 +588,10 @@ end)
 
 hook.Add("PlayerSay", "ServerAdmin_ChatGag", function(ply)
     if IsValid(ply) and Gagged[idForPlayer(ply)] then return "" end
+end)
+
+hook.Add("PlayerCanHearPlayersVoice", "ServerAdmin_VoiceMute", function(listener, talker)
+    if IsValid(talker) and Muted[idForPlayer(talker)] then return false end
 end)
 
 local blockedSpawnHooks = {
