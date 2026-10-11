@@ -1122,6 +1122,8 @@ local function runAction(ply, action)
         RunConsoleCommand(name, value)
         audit(ply, "server setting changed", nil, name .. " = " .. (item.kind == "secret" and (value == "" and "(cleared)" or "(updated)") or value))
         sendNotice(ply, true, name .. " updated.")
+        -- Refresh the client's read-only status values immediately (never the secret itself).
+        sendSnapshot(ply)
     elseif action == "botadd" then
         local amount = math.Clamp(net.ReadUInt(4), 1, 10)
         local freeSlots = math.max(0, game.MaxPlayers() - player.GetCount())
