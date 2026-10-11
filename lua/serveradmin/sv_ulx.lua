@@ -168,6 +168,16 @@ function U.IsSuperAdmin(ply)
     return IsValid(ply) and ply:IsPlayer() and (ply:IsSuperAdmin() or U.GetImmunity(ply) >= 100)
 end
 
+local function refreshPlayerPermissions()
+    for _, target in ipairs(player.GetAll()) do
+        if IsValid(target) then
+            target:SetNWString("ServerAdminULXGroup", getGroupName(target))
+            target:SetNWBool("ServerAdminULXIsAdmin", U.IsAdmin(target))
+            target:SetNWBool("ServerAdminULXIsSuperAdmin", U.IsSuperAdmin(target))
+        end
+    end
+end
+
 local function explicitAccess(ply, commandName)
     if not IsValid(ply) or not ply:IsPlayer() then return nil end
     local sid64 = keyFor(ply)
@@ -1350,6 +1360,7 @@ register("removegroup", 100, "Remove a custom group. Usage: ulx removegroup <nam
         if istable(access) then access[name] = nil end
     end
     saveStore()
+    refreshPlayerPermissions()
     logAction(ply, "removegroup", name, "")
     tell(ply, "Removed group '" .. name .. "'. Users assigned to it were moved to user.")
 end)
@@ -1481,6 +1492,7 @@ register("setgroupinheritance", 100, "Set a custom group's parent. Usage: ulx se
 
     store.groups[name].parent = parent
     saveStore()
+    refreshPlayerPermissions()
     logAction(ply, "setgroupinheritance", name, parent ~= "" and parent or "none")
     tell(ply, "Parent group for '" .. name .. "' set to '" .. (parent ~= "" and parent or "none") .. "'.")
 end, {"setgroupparent"})
@@ -1495,6 +1507,7 @@ register("immunity", 100, "Set a group's immunity. Usage: ulx immunity <group> <
     end
     store.groups[name].immunity = math.floor(value)
     saveStore()
+    refreshPlayerPermissions()
     logAction(ply, "immunity", name, tostring(math.floor(value)))
     tell(ply, "Immunity updated for '" .. name .. "'.")
 end, {"setgroupimmunity"})
