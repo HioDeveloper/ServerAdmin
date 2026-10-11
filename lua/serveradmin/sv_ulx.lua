@@ -150,15 +150,20 @@ end
 
 function U.GetImmunity(ply)
     if not IsValid(ply) or not ply:IsPlayer() then return 10000 end
-    return groupImmunity(getGroupName(ply))
+    local immunity = groupImmunity(getGroupName(ply))
+    -- A custom assignment may grant privileges but must never silently demote a
+    -- native Garry's Mod admin/superadmin below the engine's own rank.
+    if ply:IsSuperAdmin() then return math.max(immunity, 100) end
+    if ply:IsAdmin() then return math.max(immunity, 50) end
+    return immunity
 end
 
 function U.IsAdmin(ply)
-    return IsValid(ply) and ply:IsPlayer() and U.GetImmunity(ply) >= 50
+    return IsValid(ply) and ply:IsPlayer() and (ply:IsAdmin() or U.GetImmunity(ply) >= 50)
 end
 
 function U.IsSuperAdmin(ply)
-    return IsValid(ply) and ply:IsPlayer() and U.GetImmunity(ply) >= 100
+    return IsValid(ply) and ply:IsPlayer() and (ply:IsSuperAdmin() or U.GetImmunity(ply) >= 100)
 end
 
 local function explicitAccess(ply, commandName)
@@ -420,6 +425,7 @@ register("kick", 50, "Kick a connected player. Usage: ulx kick <player> [reason]
     local reason = clean(rest(args, 2), 160)
     if reason == "" then reason = "Kicked by an administrator" end
     local count = eachTarget(ply, args[1], function(target)
+        if target == ply and IsValid(ply) and ply:IsPlayer() then error("You cannot kick yourself.") end
         local name = target:Nick()
         target:Kick(reason)
         logAction(ply, "kick", name .. " [" .. target:SteamID() .. "]", reason)
@@ -753,8 +759,13 @@ register("ungag", 50, "Restore chat messages for target(s). Usage: ulx ungag <pl
 end)
 
 register("freezeall", 100, "Freeze all players below your immunity.", function(ply)
-    local count = eachTarget(ply, "@all", function(target) FROZEN[target] = target:IsFrozen(); target:Freeze(true); logAction(ply, "freeze", target:Nick(), "freezeall") end)
-    tell(ply, "Froze " .. count .. " player(s).")
+    local count = eachTarget(ply, "@all", function(target)
+        if target == ply then return end
+        FROZEN[target] = target:IsFrozen()
+        target:Freeze(true)
+        logAction(ply, "freeze", target:Nick(), "freezeall")
+    end)
+    tell(ply, "Freeze-all processed " .. count .. " player(s).")
 end)
 
 register("jail", 75, "Freeze and save current position. Usage: ulx jail <player>", function(ply, args)
@@ -962,7 +973,7 @@ register("no", 0, "Vote no in the current poll.", function(ply)
 end)
 
 -- Persistent user groups and access control
-local protectedGroups = { user = true, admin = true, superadmin = true }
+local protectedGroups = { user = true, operator = true, admin = true, superadmin = true }
 
 register("groups", 0, "List configured user groups.", function(ply)
     local names = {}
@@ -989,6 +1000,12 @@ register("removegroup", 100, "Remove a custom group. Usage: ulx removegroup <nam
     if not requireArgs(ply, args, 1, "removegroup <name>") then return end
     local name = string.lower(clean(args[1], 32))
     if protectedGroups[name] or not store.groups[name] then tell(ply, "Group cannot be removed or does not exist."); return end
+    for childName, child in pairs(store.groups) do
+        if childName ~= name and tostring(child.parent or "") == name then
+            tell(ply, "Cannot remove this group: '" .. childName .. "' inherits from it. Reassign the child group's parent first.")
+            return
+        end
+    end
     for sid64, group in pairs(store.users) do
         if group == name then store.users[sid64] = "user" end
     end
@@ -1199,6 +1216,13 @@ net.Receive(ULX_NET, function(_, ply)
             tell(ply, "Default or unknown groups cannot be removed.")
             sendGroupSnapshot(ply)
             return
+        end
+        for childName, child in pairs(store.groups) do
+            if childName ~= name and tostring(child.parent or "") == name then
+                tell(ply, "Cannot delete this group because '" .. childName .. "' inherits from it.")
+                sendGroupSnapshot(ply)
+                return
+            end
         end
         for sid64, groupName in pairs(store.users) do
             if groupName == name then store.users[sid64] = "user" end
