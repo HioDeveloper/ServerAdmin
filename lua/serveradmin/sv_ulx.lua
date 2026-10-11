@@ -1677,6 +1677,42 @@ net.Receive(ULX_NET, function(_, ply)
         saveStore()
         logAction(ply, "addgroup", name, "immunity=" .. immunity .. ", parent=" .. parent)
         sendGroupSnapshot(ply)
+    elseif action == "update_group" then
+        local name = string.lower(clean(net.ReadString(), 32))
+        local immunity = net.ReadUInt(10)
+        local parent = string.lower(clean(net.ReadString(), 32))
+        if parent == "none" then parent = "" end
+        if protectedGroups[name] or not store.groups[name] or immunity > 99 then
+            tell(ply, "Built-in groups cannot be edited and immunity must be from 0 to 99.")
+            sendGroupSnapshot(ply)
+            return
+        end
+        if parent ~= "" and not store.groups[parent] then
+            tell(ply, "Parent group does not exist.")
+            sendGroupSnapshot(ply)
+            return
+        end
+        if parent == name then
+            tell(ply, "A group cannot inherit from itself.")
+            sendGroupSnapshot(ply)
+            return
+        end
+        local cursor, visited = parent, {}
+        while cursor ~= "" and store.groups[cursor] do
+            if cursor == name or visited[cursor] then
+                tell(ply, "That parent would create a group inheritance cycle.")
+                sendGroupSnapshot(ply)
+                return
+            end
+            visited[cursor] = true
+            cursor = tostring(store.groups[cursor].parent or "")
+        end
+        store.groups[name].immunity = immunity
+        store.groups[name].parent = parent
+        saveStore()
+        refreshPlayerPermissions()
+        logAction(ply, "update group", name, "immunity=" .. immunity .. ", parent=" .. (parent ~= "" and parent or "none"))
+        sendGroupSnapshot(ply)
     elseif action == "delete_group" then
         local name = string.lower(clean(net.ReadString(), 32))
         if protectedGroups[name] or not store.groups[name] then
