@@ -1671,6 +1671,20 @@ local function sendGroupSnapshot(ply)
     table.sort(snapshot.commands, function(a, b) return a.name < b.name end)
 
     local payload = util.TableToJSON(snapshot, false) or "{}"
+    -- Trim only offline assignments when an unusually large roster would exceed the net
+    -- payload budget. Those identities remain saved and can still be entered manually.
+    while #payload > 58000 do
+        local removeIndex
+        for i = #snapshot.users, 1, -1 do
+            if snapshot.users[i].online == false then
+                removeIndex = i
+                break
+            end
+        end
+        if not removeIndex then break end
+        table.remove(snapshot.users, removeIndex)
+        payload = util.TableToJSON(snapshot, false) or "{}"
+    end
     if #payload > 60000 then
         tell(ply, "Group editor snapshot is too large to send safely.")
         return
