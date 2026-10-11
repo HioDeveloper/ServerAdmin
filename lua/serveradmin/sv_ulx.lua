@@ -247,9 +247,9 @@ local function listTargets(query, actor)
         elseif string.find(name, lower, 1, true) then partial[#partial + 1] = target end
     end
     if #exact == 1 then return exact end
-    if #exact > 1 then return exact, "More than one player matches; use a SteamID or user ID." end
+    if #exact > 1 then return {}, "More than one player matches; use a SteamID or user ID." end
     if #partial == 1 then return partial end
-    if #partial > 1 then return partial, "More than one player matches; use a more specific name." end
+    if #partial > 1 then return {}, "More than one player matches; use a more specific name." end
     return {}, "No connected player matches '" .. query .. "'."
 end
 
@@ -1188,7 +1188,11 @@ register("removeuser", 100, "Remove a custom group assignment. Usage: ulx remove
     store.users[sid64] = nil
     saveStore()
     for _, target in ipairs(player.GetAll()) do
-        if keyFor(target) == sid64 then target:SetNWString("ServerAdminULXGroup", getGroupName(target)) end
+        if keyFor(target) == sid64 then
+            target:SetNWString("ServerAdminULXGroup", getGroupName(target))
+            target:SetNWBool("ServerAdminULXIsAdmin", U.IsAdmin(target))
+            target:SetNWBool("ServerAdminULXIsSuperAdmin", U.IsSuperAdmin(target))
+        end
     end
     logAction(ply, "removeuser", display, "")
     tell(ply, "Removed custom group assignment for " .. display .. ".")
@@ -1198,7 +1202,9 @@ local function setGroupPermission(ply, args, groupMode, value)
     if not requireArgs(ply, args, 2, (groupMode and "groupallow/groupdeny <group> <command>" or "userallow/userdeny <SteamID64> <command>")) then return end
     local subject = clean(args[1], 32)
     local command = string.lower(clean(args[2], 48))
-    if not findCommand(command) then tell(ply, "Unknown command name. Run ulx help."); return end
+    local definition = findCommand(command)
+    if not definition then tell(ply, "Unknown command name. Run ulx help."); return end
+    command = definition.name
     if groupMode then
         if not store.groups[subject] then tell(ply, "Group does not exist."); return end
         store.groupAccess[subject] = istable(store.groupAccess[subject]) and store.groupAccess[subject] or {}
@@ -1362,7 +1368,11 @@ net.Receive(ULX_NET, function(_, ply)
         saveStore()
         for _, target in ipairs(player.GetAll()) do
             local sid64 = keyFor(target)
-            if sid64 and store.users[sid64] == "user" then target:SetNWString("ServerAdminULXGroup", "user") end
+            if sid64 and store.users[sid64] == "user" then
+                target:SetNWString("ServerAdminULXGroup", "user")
+                target:SetNWBool("ServerAdminULXIsAdmin", U.IsAdmin(target))
+                target:SetNWBool("ServerAdminULXIsSuperAdmin", U.IsSuperAdmin(target))
+            end
         end
         logAction(ply, "removegroup", name, "Removed through group editor")
         sendGroupSnapshot(ply)
@@ -1388,12 +1398,14 @@ net.Receive(ULX_NET, function(_, ply)
     elseif action == "set_group_access" then
         local groupName = string.lower(clean(net.ReadString(), 32))
         local commandName = string.lower(clean(net.ReadString(), 48))
+        local commandDefinition = findCommand(commandName)
         local mode = net.ReadUInt(2)
-        if not store.groups[groupName] or not findCommand(commandName) or mode > 2 then
+        if not store.groups[groupName] or not commandDefinition or mode > 2 then
             tell(ply, "Invalid group, command or permission mode.")
             sendGroupSnapshot(ply)
             return
         end
+        commandName = commandDefinition.name
         store.groupAccess[groupName] = istable(store.groupAccess[groupName]) and store.groupAccess[groupName] or {}
         if mode == 0 then
             store.groupAccess[groupName][commandName] = nil
