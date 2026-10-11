@@ -29,6 +29,16 @@ local function validSteamID64(value)
     return isstring(value) and #value == 17 and string.match(value, "^%d+$") ~= nil
 end
 
+local function resolveSteamID64(value)
+    value = tostring(value or "")
+    if validSteamID64(value) then return value end
+    if validSteamID(value) and isfunction(util.SteamIDTo64) then
+        local ok, converted = pcall(util.SteamIDTo64, value)
+        if ok and validSteamID64(tostring(converted or "")) then return tostring(converted) end
+    end
+    return nil
+end
+
 local function keyFor(ply)
     if not IsValid(ply) or not ply:IsPlayer() then return nil end
     local value = ply:SteamID64()
@@ -1439,8 +1449,10 @@ register("adduser", 100, "Assign a player or SteamID64 to a group. Usage: ulx ad
     local group = string.lower(clean(args[2], 32))
     if not store.groups[group] then tell(ply, "Group does not exist."); return end
     local sid64, display
-    if validSteamID64(tostring(args[1] or "")) then
-        sid64, display = tostring(args[1]), tostring(args[1])
+    local identity = tostring(args[1] or "")
+    sid64 = resolveSteamID64(identity)
+    if sid64 then
+        display = identity
     else
         local target = singleTarget(ply, args, 1)
         if not target then return end
@@ -1463,7 +1475,9 @@ end, {"usergroup"})
 register("removeuser", 100, "Remove a custom group assignment. Usage: ulx removeuser <player|SteamID64>", function(ply, args)
     if not requireArgs(ply, args, 1, "removeuser <player|SteamID64>") then return end
     local sid64, display
-    if validSteamID64(tostring(args[1] or "")) then sid64, display = tostring(args[1]), tostring(args[1])
+    local identity = tostring(args[1] or "")
+    sid64 = resolveSteamID64(identity)
+    if sid64 then display = identity
     else
         local target = singleTarget(ply, args, 1)
         if not target then return end
@@ -1495,9 +1509,11 @@ local function setGroupPermission(ply, args, groupMode, value)
         store.groupAccess[subject] = istable(store.groupAccess[subject]) and store.groupAccess[subject] or {}
         store.groupAccess[subject][command] = value
     else
-        if not validSteamID64(subject) then tell(ply, "A 17-digit SteamID64 is required."); return end
-        store.userAccess[subject] = istable(store.userAccess[subject]) and store.userAccess[subject] or {}
-        store.userAccess[subject][command] = value
+        local sid64 = resolveSteamID64(subject)
+        if not sid64 then tell(ply, "A valid SteamID or 17-digit SteamID64 is required."); return end
+        subject = sid64
+        store.userAccess[sid64] = istable(store.userAccess[sid64]) and store.userAccess[sid64] or {}
+        store.userAccess[sid64][command] = value
     end
     saveStore()
     logAction(ply, groupMode and "group access" or "user access", subject, command .. "=" .. tostring(value))
@@ -1512,19 +1528,20 @@ register("groupdeny", 100, "Deny a group a command. Usage: ulx groupdeny <group>
     setGroupPermission(ply, args, true, false)
 end)
 
-register("userallow", 100, "Allow a SteamID64 a command. Usage: ulx userallow <SteamID64> <command>", function(ply, args)
+register("userallow", 100, "Allow a SteamID/SteamID64 to use a command. Usage: ulx userallow <SteamID|SteamID64> <command>", function(ply, args)
     setGroupPermission(ply, args, false, true)
-end)
+end, {"userallowid"})
 
-register("userdeny", 100, "Deny a SteamID64 a command. Usage: ulx userdeny <SteamID64> <command>", function(ply, args)
+register("userdeny", 100, "Deny a SteamID/SteamID64 a command. Usage: ulx userdeny <SteamID|SteamID64> <command>", function(ply, args)
     setGroupPermission(ply, args, false, false)
-end)
+end, {"userdenyid"})
 
 register("access", 100, "Show resolved group, immunity and command overrides. Usage: ulx access <player|SteamID64>", function(ply, args)
     if not requireArgs(ply, args, 1, "access <player|SteamID64>") then return end
     local sid64, groupName
-    if validSteamID64(tostring(args[1] or "")) then
-        sid64 = tostring(args[1])
+    local identity = tostring(args[1] or "")
+    sid64 = resolveSteamID64(identity)
+    if sid64 then
         groupName = store.users[sid64] or "user"
     else
         local target = singleTarget(ply, args, 1)
