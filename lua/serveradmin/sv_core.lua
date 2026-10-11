@@ -648,15 +648,15 @@ local function sendSnapshot(ply)
         for i = 1, math.min(#players, 255) do
             local target = players[i]
             local teamName = team.GetName(target:Team()) or "Unknown"
-            local role = target:IsSuperAdmin() and "Superadmin" or (target:IsAdmin() and "Admin" or "Player")
+            local role = isSuperAdmin(target) and "Superadmin" or (isAdmin(target) and "Admin" or "Player")
             local jobID = target:Team()
             net.WriteUInt(math.Clamp(target:UserID(), 0, 65535), 16)
             net.WriteString(cleanText(target:Nick(), 64))
             net.WriteString(cleanText(target:SteamID(), 32))
             net.WriteUInt(math.Clamp(tonumber(target:Ping()) or 0, 0, 65535), 16)
             net.WriteString(cleanText(teamName, 64))
-            net.WriteBool(target:IsAdmin())
-            net.WriteBool(target:IsSuperAdmin())
+            net.WriteBool(isAdmin(target))
+            net.WriteBool(isSuperAdmin(target))
             net.WriteBool(target:Alive())
             net.WriteInt(getMoney(target), 32)
             net.WriteUInt(math.Clamp(target:Health(), 0, 255), 8)
@@ -1312,7 +1312,7 @@ local blockedSpawnHooks = {
 }
 for _, hookName in ipairs(blockedSpawnHooks) do
     hook.Add(hookName, "ServerAdmin_BuildLockdown_" .. hookName, function(ply)
-        if ServerAdmin.Lockdown and IsValid(ply) and ply:IsPlayer() and not ply:IsAdmin() then return false end
+        if ServerAdmin.Lockdown and IsValid(ply) and ply:IsPlayer() and not isAdmin(ply) then return false end
     end)
 end
 
@@ -1335,13 +1335,13 @@ end)
 
 hook.Add("PlayerInitialSpawn", "ServerAdmin_AdminHint", function(ply)
     timer.Simple(8, function()
-        if IsValid(ply) and ply:IsAdmin() then
+        if IsValid(ply) and isAdmin(ply) then
             ply:ChatPrint("[ServerAdmin] Admin panel ready. Press F6 or type serveradmin.")
         end
     end)
 end)
 
 concommand.Add("serveradmin_status", function(ply)
-    if IsValid(ply) and not ply:IsSuperAdmin() then return end
+    if IsValid(ply) and not isSuperAdmin(ply) then return end
     print("[ServerAdmin] v" .. (ServerAdmin.Version or "3.0.0") .. " loaded.")
 end)
