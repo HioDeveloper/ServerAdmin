@@ -394,6 +394,16 @@ register("help", 0, "List available commands and aliases.", function(ply, args)
     if #rows > 45 then tell(ply, "Showing first 45; run 'ulx help <filter>' to narrow the list.") end
 end, {"commands"})
 
+register("cmdhelp", 0, "Show usage and permission details for a command. Usage: ulx cmdhelp <command>", function(ply, args)
+    if not requireArgs(ply, args, 1, "cmdhelp <command>") then return end
+    local command = findCommand(args[1])
+    if not command then tell(ply, "Unknown command. Run ulx help."); return end
+    tell(ply, "Command: ulx " .. command.name)
+    tell(ply, "Usage/details: " .. command.help)
+    tell(ply, "Minimum immunity: " .. tostring(command.minImmunity))
+    if #command.aliases > 0 then tell(ply, "Aliases: " .. table.concat(command.aliases, ", ")) end
+end, {"commandhelp"})
+
 register("menu", 0, "Open the ServerAdmin management panel.", function(ply)
     if IsValid(ply) and ply:IsPlayer() then ply:ConCommand("serveradmin")
     else tell(ply, "Open the ServerAdmin panel in-game with F6 or the serveradmin console command.") end
@@ -567,6 +577,7 @@ end)
 register("bring", 50, "Teleport target(s) to you. Usage: ulx bring <player>", function(ply, args)
     if not IsValid(ply) or not ply:IsPlayer() then tell(ply, "Bring requires an in-game administrator."); return end
     local count = eachTarget(ply, args[1], function(target)
+        ORIGINAL_JAIL_POS[target] = target:GetPos()
         target:SetPos(ply:GetPos() + ply:GetForward() * 72 + Vector(0, 0, 8))
         logAction(ply, "bring", target:Nick(), "")
     end)
@@ -578,6 +589,7 @@ register("goto", 50, "Teleport yourself to a player. Usage: ulx goto <player>", 
     local target = singleTarget(ply, args)
     if not target then return end
     if target == ply then tell(ply, "You are already at your own location."); return end
+    ORIGINAL_JAIL_POS[ply] = ply:GetPos()
     ply:SetPos(target:GetPos() + target:GetForward() * 72 + Vector(0, 0, 8))
     logAction(ply, "goto", target:Nick(), "")
     tell(ply, "Teleported to " .. target:Nick() .. ".")
@@ -590,6 +602,7 @@ register("send", 50, "Send a player to another player. Usage: ulx send <player> 
     local destination = singleTarget(ply, { args[2] }, 1)
     if not destination then return end
     if not canTarget(ply, destination) then tell(ply, "Destination player has too much immunity."); return end
+    ORIGINAL_JAIL_POS[target] = target:GetPos()
     target:SetPos(destination:GetPos() + destination:GetForward() * 72 + Vector(0, 0, 8))
     logAction(ply, "send", target:Nick(), "to " .. destination:Nick())
     tell(ply, "Moved " .. target:Nick() .. " to " .. destination:Nick() .. ".")
@@ -1446,6 +1459,32 @@ register("access", 100, "Show resolved group, immunity and command overrides. Us
     end
 end)
 
+register("setgroupinheritance", 100, "Set a custom group's parent. Usage: ulx setgroupinheritance <group> <parent|none>", function(ply, args)
+    if not requireArgs(ply, args, 2, "setgroupinheritance <group> <parent|none>") then return end
+    local name = string.lower(clean(args[1], 32))
+    local parent = string.lower(clean(args[2], 32))
+    if parent == "none" then parent = "" end
+    if protectedGroups[name] or not store.groups[name] then
+        tell(ply, "Choose an existing custom group; built-in groups cannot be edited.")
+        return
+    end
+    if parent ~= "" and not store.groups[parent] then tell(ply, "Parent group does not exist."); return end
+    if parent == name then tell(ply, "A group cannot inherit from itself."); return end
+
+    local cursor, visited = parent, {}
+    while cursor ~= "" and store.groups[cursor] do
+        if cursor == name then tell(ply, "This inheritance would create a cycle."); return end
+        if visited[cursor] then tell(ply, "The existing inheritance chain contains a cycle."); return end
+        visited[cursor] = true
+        cursor = tostring(store.groups[cursor].parent or "")
+    end
+
+    store.groups[name].parent = parent
+    saveStore()
+    logAction(ply, "setgroupinheritance", name, parent ~= "" and parent or "none")
+    tell(ply, "Parent group for '" .. name .. "' set to '" .. (parent ~= "" and parent or "none") .. "'.")
+end, {"setgroupparent"})
+
 register("immunity", 100, "Set a group's immunity. Usage: ulx immunity <group> <0-99>", function(ply, args)
     if not requireArgs(ply, args, 2, "immunity <group> <0-99>") then return end
     local name = tostring(args[1] or "")
@@ -1458,7 +1497,7 @@ register("immunity", 100, "Set a group's immunity. Usage: ulx immunity <group> <
     saveStore()
     logAction(ply, "immunity", name, tostring(math.floor(value)))
     tell(ply, "Immunity updated for '" .. name .. "'.")
-end)
+end, {"setgroupimmunity"})
 
 register("logs", 50, "Show recent ServerAdmin ULX command log entries. Usage: ulx logs [count]", function(ply, args)
     local count = math.floor(parseNumber(args[1], 1, 20, 10))
