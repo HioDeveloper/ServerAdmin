@@ -5,6 +5,7 @@ ServerAdmin.Version = "3.0.0"
 if SERVER then
     AddCSLuaFile("serveradmin/cl_menu.lua")
     include("serveradmin/sv_core.lua")
+    include("serveradmin/sv_ulx.lua")
 else
     include("serveradmin/cl_menu.lua")
 end
