@@ -453,7 +453,7 @@ register("kick", 50, "Kick a connected player. Usage: ulx kick <player> [reason]
         logAction(ply, "kick", name .. " [" .. target:SteamID() .. "]", reason)
     end)
     if count > 0 then tell(ply, "Kicked " .. count .. " player(s).") end
-end, {"boot"})
+end, {"boot", "kickid"})
 
 register("ban", 50, "Ban online player(s). Minutes 0 = permanent. Usage: ulx ban <player> <minutes> [reason]", function(ply, args)
     if not requireArgs(ply, args, 2, "ban <player> <minutes> [reason]") then return end
@@ -694,7 +694,7 @@ end)
 register("extinguish", 50, "Extinguish target(s). Usage: ulx extinguish <player>", function(ply, args)
     local count = eachTarget(ply, args[1], function(target) target:Extinguish(); logAction(ply, "extinguish", target:Nick(), "") end)
     if count > 0 then tell(ply, "Extinguished " .. count .. " player(s).") end
-end)
+end, {"unignite"})
 
 register("blind", 50, "Apply a screen fade to target(s). Usage: ulx blind <player> [seconds]", function(ply, args)
     local seconds = parseNumber(args[2], 1, 120, 20)
@@ -1316,6 +1316,74 @@ register("cvars", 100, "List cvars supported by the ServerAdmin allow-list.", fu
     for name in pairs(ULX_CVAR_ALLOWLIST) do names[#names + 1] = name end
     table.sort(names)
     tell(ply, "Supported cvars: " .. table.concat(names, ", "))
+end)
+
+
+-- High-impact ULX tools. These are superadmin-only and always audited.
+-- RunConsoleCommand is used with separate arguments, never by concatenating a command string.
+register("rcon", 100, "Run a server console command. Usage: ulx rcon <command> [arguments]", function(ply, args)
+    if not requireArgs(ply, args, 1, "rcon <command> [arguments]") then return end
+    local commandName = clean(args[1], 64)
+    if commandName == "" or not string.match(commandName, "^[%w_%.%-]+$") then
+        tell(ply, "Invalid console command name.")
+        return
+    end
+    local commandArgs = {}
+    for i = 2, #args do
+        commandArgs[#commandArgs + 1] = clean(args[i], 180)
+    end
+    logAction(ply, "rcon", commandName, table.concat(commandArgs, " "))
+    RunConsoleCommand(commandName, unpack(commandArgs))
+    tell(ply, "Server console command dispatched: " .. commandName .. ". Check the server console/logs for its output.")
+end)
+
+register("lua", 100, "Execute Lua on the server. Usage: ulx lua <code>", function(ply, args)
+    local code = clean(rest(args, 1), 4000)
+    if code == "" then tell(ply, "Usage: ulx lua <code>"); return end
+    logAction(ply, "lua", "-", string.sub(code, 1, 180))
+    local ok, err = pcall(RunString, code, "ServerAdminULX", false)
+    if not ok then
+        tell(ply, "Lua execution failed: " .. clean(err, 160))
+        ErrorNoHalt("[ServerAdmin/ULX] Lua command failed: " .. clean(err, 240) .. "\n")
+        return
+    end
+    tell(ply, "Lua code submitted to the server runtime.")
+end, {"runlua"})
+
+register("ent", 100, "Spawn an entity at your aim position. Usage: ulx ent <class> [key:value|key:value]", function(ply, args)
+    if not IsValid(ply) or not ply:IsPlayer() then tell(ply, "Entity spawning requires an in-game superadmin."); return end
+    if not requireArgs(ply, args, 1, "ent <class> [key:value|key:value]") then return end
+    local class = clean(args[1], 64)
+    if not string.match(class, "^[%w_%-]+$") then tell(ply, "Invalid entity class."); return end
+    local trace = ply:GetEyeTrace()
+    if not trace or not trace.HitPos then tell(ply, "Could not find a spawn position."); return end
+
+    local entity = ents.Create(class)
+    if not IsValid(entity) then tell(ply, "Unknown or non-spawnable entity class: " .. class); return end
+    local params = clean(rest(args, 2), 600)
+    if params ~= "" then
+        for pair in string.gmatch(params, "([^|]+)") do
+            local key, value = string.match(pair, "^%s*([^:]+)%s*:%s*(.-)%s*$")
+            if key and value then
+                key = clean(key, 64)
+                value = clean(value, 128)
+                if key ~= "" then entity:SetKeyValue(key, value) end
+            end
+        end
+    end
+    entity:SetPos(trace.HitPos + Vector(0, 0, 20))
+    entity:SetAngles(Angle(0, ply:EyeAngles().y, 0))
+    entity:Spawn()
+    entity:Activate()
+    if not IsValid(entity) then tell(ply, "Entity failed to spawn."); return end
+    if undo and undo.Create then
+        undo.Create("ServerAdmin ULX entity")
+        undo.AddEntity(entity)
+        undo.SetPlayer(ply)
+        undo.Finish()
+    end
+    logAction(ply, "ent", class, params)
+    tell(ply, "Spawned entity '" .. class .. "' (#" .. entity:EntIndex() .. ").")
 end)
 
 -- Persistent user groups and access control
