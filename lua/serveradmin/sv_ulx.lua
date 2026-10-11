@@ -1123,6 +1123,128 @@ register("clearlog", 100, "Clear the ServerAdmin ULX command log.", function(ply
     tell(ply, "ULX command log cleared.")
 end)
 
+-- The group editor talks through a dedicated channel. It never trusts a client-supplied
+-- immunity or command name without validating it again on the server.
+local ULX_NET = "serveradmin_ulx_net"
+util.AddNetworkString(ULX_NET)
+
+local function sendGroupSnapshot(ply)
+    local snapshot = { groups = {}, users = {}, commands = {} }
+    for name, group in pairs(store.groups) do
+        snapshot.groups[#snapshot.groups + 1] = {
+            name = name,
+            immunity = math.floor(tonumber(group.immunity) or 0),
+            parent = tostring(group.parent or "")
+        }
+    end
+    table.sort(snapshot.groups, function(a, b) return a.name < b.name end)
+
+    for _, target in ipairs(player.GetAll()) do
+        snapshot.users[#snapshot.users + 1] = {
+            name = clean(target:Nick(), 64),
+            steamid = target:SteamID(),
+            steamid64 = target:SteamID64(),
+            group = getGroupName(target),
+            immunity = U.GetImmunity(target)
+        }
+    end
+    table.sort(snapshot.users, function(a, b) return string.lower(a.name) < string.lower(b.name) end)
+
+    for name, command in pairs(COMMANDS) do
+        snapshot.commands[#snapshot.commands + 1] = { name = name, help = command.help }
+    end
+    table.sort(snapshot.commands, function(a, b) return a.name < b.name end)
+
+    local payload = util.TableToJSON(snapshot, false) or "{}"
+    if #payload > 60000 then
+        tell(ply, "Group editor snapshot is too large to send safely.")
+        return
+    end
+    net.Start(ULX_NET)
+        net.WriteString("snapshot")
+        net.WriteString(payload)
+    net.Send(ply)
+end
+
+net.Receive(ULX_NET, function(_, ply)
+    if not IsValid(ply) or not ply:IsPlayer() or not U.IsSuperAdmin(ply) then return end
+    local action = net.ReadString()
+    if action == "snapshot" then
+        sendGroupSnapshot(ply)
+        return
+    end
+
+    if action == "create_group" then
+        local name = string.lower(clean(net.ReadString(), 32))
+        local immunity = math.Clamp(net.ReadUInt(10), 0, 99)
+        local parent = string.lower(clean(net.ReadString(), 32))
+        if not string.match(name, "^[%w_%-]+$") or store.groups[name] or protectedGroups[name] then
+            tell(ply, "Invalid or existing group name.")
+            sendGroupSnapshot(ply)
+            return
+        end
+        if not store.groups[parent] then tell(ply, "Parent group does not exist."); sendGroupSnapshot(ply); return end
+        store.groups[name] = { immunity = immunity, parent = parent, access = {} }
+        store.groupAccess[name] = {}
+        saveStore()
+        logAction(ply, "addgroup", name, "immunity=" .. immunity .. ", parent=" .. parent)
+        sendGroupSnapshot(ply)
+    elseif action == "delete_group" then
+        local name = string.lower(clean(net.ReadString(), 32))
+        if protectedGroups[name] or not store.groups[name] then
+            tell(ply, "Default or unknown groups cannot be removed.")
+            sendGroupSnapshot(ply)
+            return
+        end
+        for sid64, groupName in pairs(store.users) do
+            if groupName == name then store.users[sid64] = "user" end
+        end
+        store.groups[name], store.groupAccess[name] = nil, nil
+        saveStore()
+        for _, target in ipairs(player.GetAll()) do
+            local sid64 = keyFor(target)
+            if sid64 and store.users[sid64] == "user" then target:SetNWString("ServerAdminULXGroup", "user") end
+        end
+        logAction(ply, "removegroup", name, "Removed through group editor")
+        sendGroupSnapshot(ply)
+    elseif action == "assign_group" then
+        local sid64 = clean(net.ReadString(), 17)
+        local name = string.lower(clean(net.ReadString(), 32))
+        if not validSteamID64(sid64) or not store.groups[name] then
+            tell(ply, "Invalid SteamID64 or group.")
+            sendGroupSnapshot(ply)
+            return
+        end
+        store.users[sid64] = name
+        saveStore()
+        for _, target in ipairs(player.GetAll()) do
+            if keyFor(target) == sid64 then target:SetNWString("ServerAdminULXGroup", name) end
+        end
+        logAction(ply, "adduser", sid64, name .. " (group editor)")
+        sendGroupSnapshot(ply)
+    elseif action == "set_group_access" then
+        local groupName = string.lower(clean(net.ReadString(), 32))
+        local commandName = string.lower(clean(net.ReadString(), 48))
+        local mode = net.ReadUInt(2)
+        if not store.groups[groupName] or not findCommand(commandName) or mode > 2 then
+            tell(ply, "Invalid group, command or permission mode.")
+            sendGroupSnapshot(ply)
+            return
+        end
+        store.groupAccess[groupName] = istable(store.groupAccess[groupName]) and store.groupAccess[groupName] or {}
+        if mode == 0 then
+            store.groupAccess[groupName][commandName] = nil
+        else
+            store.groupAccess[groupName][commandName] = mode == 1
+        end
+        saveStore()
+        logAction(ply, "group access", groupName, commandName .. "=" .. (mode == 0 and "inherit" or (mode == 1 and "allow" or "deny")))
+        sendGroupSnapshot(ply)
+    else
+        tell(ply, "Unknown group editor request.")
+    end
+end)
+
 -- ULX-style prefix commands and admin chat. A small tokenizer keeps quoted player names intact.
 local function tokenize(text)
     local out, current, quote, escaped = {}, "", nil, false
