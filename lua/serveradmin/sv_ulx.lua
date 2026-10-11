@@ -1627,13 +1627,40 @@ local function sendGroupSnapshot(ply)
     end
     table.sort(snapshot.groups, function(a, b) return a.name < b.name end)
 
+    local seenUsers = {}
     for _, target in ipairs(player.GetAll()) do
+        local sid64 = keyFor(target)
+        if sid64 then seenUsers[sid64] = true end
         snapshot.users[#snapshot.users + 1] = {
             name = clean(target:Nick(), 64),
             steamid = target:SteamID(),
             steamid64 = target:SteamID64(),
             group = getGroupName(target),
-            immunity = U.GetImmunity(target)
+            immunity = U.GetImmunity(target),
+            online = true
+        }
+    end
+
+    -- Include assigned offline identities in the group editor so they can be managed
+    -- without requiring the player to join. Cap the offline portion to keep the net payload small.
+    local offlineIDs = {}
+    for sid64, groupName in pairs(store.users) do
+        sid64 = tostring(sid64)
+        if validSteamID64(sid64) and not seenUsers[sid64] and store.groups[groupName] then
+            offlineIDs[#offlineIDs + 1] = sid64
+        end
+    end
+    table.sort(offlineIDs)
+    for i = 1, math.min(#offlineIDs, 150) do
+        local sid64 = offlineIDs[i]
+        local groupName = store.users[sid64]
+        snapshot.users[#snapshot.users + 1] = {
+            name = sid64,
+            steamid = isfunction(util.SteamIDFrom64) and util.SteamIDFrom64(sid64) or "",
+            steamid64 = sid64,
+            group = groupName,
+            immunity = groupImmunity(groupName),
+            online = false
         }
     end
     table.sort(snapshot.users, function(a, b) return string.lower(a.name) < string.lower(b.name) end)
@@ -1743,10 +1770,11 @@ net.Receive(ULX_NET, function(_, ply)
         logAction(ply, "removegroup", name, "Removed through group editor")
         sendGroupSnapshot(ply)
     elseif action == "assign_group" then
-        local sid64 = clean(net.ReadString(), 17)
+        local identity = clean(net.ReadString(), 32)
+        local sid64 = resolveSteamID64(identity)
         local name = string.lower(clean(net.ReadString(), 32))
-        if not validSteamID64(sid64) or not store.groups[name] then
-            tell(ply, "Invalid SteamID64 or group.")
+        if not sid64 or not store.groups[name] then
+            tell(ply, "Invalid SteamID/SteamID64 or group.")
             sendGroupSnapshot(ply)
             return
         end
@@ -1759,7 +1787,7 @@ net.Receive(ULX_NET, function(_, ply)
                 target:SetNWBool("ServerAdminULXIsSuperAdmin", U.IsSuperAdmin(target))
             end
         end
-        logAction(ply, "adduser", sid64, name .. " (group editor)")
+        logAction(ply, "adduser", sid64, name .. " (group editor; identity " .. identity .. ")")
         sendGroupSnapshot(ply)
     elseif action == "set_group_access" then
         local groupName = string.lower(clean(net.ReadString(), 32))
