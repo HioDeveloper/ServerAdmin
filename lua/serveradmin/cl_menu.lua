@@ -1238,12 +1238,14 @@ local function buildPanel()
 
     -- Dedicated password controls are placed here so admins don't need to find sv_password
     -- in the generic cvar list. The current password is never queried from the server.
+    local passwordStatusText = "checking…"
     local passwordPanel = vgui.Create("DPanel", serverPage)
     passwordPanel:Dock(TOP); passwordPanel:SetTall(112); passwordPanel:DockMargin(0, 0, 0, 10)
     passwordPanel.Paint = function(self, w, h)
         rounded(0, 0, w, h, C.panel2, 9)
         draw.SimpleText("SERVER ACCESS PASSWORD", "DermaDefaultBold", 14, 18, C.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
         draw.SimpleText("Set a password for new connections, or clear it to make the server public.", "DermaDefault", 14, 36, C.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+        draw.SimpleText("Status: " .. passwordStatusText, "DermaDefaultBold", w - 14, 18, C.cyan, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
     end
     local passwordEntry = vgui.Create("DTextEntry", passwordPanel)
     passwordEntry:SetPlaceholderText("Enter a new server password (max 64 characters)")
@@ -1284,17 +1286,11 @@ local function buildPanel()
         applyPasswordButton:SetPos(24 + entryWidth, 56); applyPasswordButton:SetSize(132, 36)
         clearPasswordButton:SetPos(162 + entryWidth, 56); clearPasswordButton:SetSize(132, 36)
     end
-    local passwordStatus = label(passwordPanel, "Current password status: checking…", "DermaDefault", C.muted)
-    passwordStatus:SetPos(0, 0); passwordStatus:SetSize(300, 1)
     passwordPanel.Think = function()
-        if not IsValid(passwordStatus) then return end
         for _, cv in ipairs(state.cvars or {}) do
             if cv.name == "sv_password" then
-                local statusText = cv.value == "set" and "Password is set" or
-                    (cv.value == "unavailable" and "Password setting unavailable" or "No password set")
-                if passwordStatus:GetText() ~= "Current status: " .. statusText then
-                    passwordStatus:SetText("Current status: " .. statusText)
-                end
+                passwordStatusText = cv.value == "set" and "set" or
+                    (cv.value == "unavailable" and "unavailable" or "not set")
                 return
             end
         end
