@@ -1236,6 +1236,70 @@ local function buildPanel()
     end)
     lockdownButton:SetPos(438, 60); lockdownButton:SetSize(190, 34)
 
+    -- Dedicated password controls are placed here so admins don't need to find sv_password
+    -- in the generic cvar list. The current password is never queried from the server.
+    local passwordPanel = vgui.Create("DPanel", serverPage)
+    passwordPanel:Dock(TOP); passwordPanel:SetTall(112); passwordPanel:DockMargin(0, 0, 0, 10)
+    passwordPanel.Paint = function(self, w, h)
+        rounded(0, 0, w, h, C.panel2, 9)
+        draw.SimpleText("SERVER ACCESS PASSWORD", "DermaDefaultBold", 14, 18, C.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+        draw.SimpleText("Set a password for new connections, or clear it to make the server public.", "DermaDefault", 14, 36, C.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+    end
+    local passwordEntry = vgui.Create("DTextEntry", passwordPanel)
+    passwordEntry:SetPlaceholderText("Enter a new server password (max 64 characters)")
+    passwordEntry:SetUpdateOnType(true)
+    local applyPasswordButton = button(passwordPanel, "Set password", C.blue, function()
+        local password = passwordEntry:GetValue() or ""
+        if password == "" then
+            notify("Enter a password, or use Clear password to make the server public.", false)
+            return
+        end
+        if #password > 64 then notify("Password must be 64 characters or fewer.", false) return end
+        if string.find(password, "[%c;]") then
+            notify("Password cannot contain control characters or semicolons.", false)
+            return
+        end
+        Derma_Query("Players connecting to this server will need the new password. Apply it now?", "Set server password",
+            "Set password", function()
+                request("setcvar", function()
+                    net.WriteString("sv_password")
+                    net.WriteString(password)
+                end)
+                if IsValid(passwordEntry) then passwordEntry:SetText("") end
+            end, "Cancel")
+    end, 34)
+    local clearPasswordButton = button(passwordPanel, "Clear password", C.red, function()
+        Derma_Query("Remove the server password? Anyone will be able to attempt to connect.", "Clear server password",
+            "Make server public", function()
+                request("setcvar", function()
+                    net.WriteString("sv_password")
+                    net.WriteString("")
+                end)
+                if IsValid(passwordEntry) then passwordEntry:SetText("") end
+            end, "Cancel")
+    end, 34)
+    passwordPanel.PerformLayout = function(self, w)
+        local entryWidth = math.max(160, w - 318)
+        passwordEntry:SetPos(14, 56); passwordEntry:SetSize(entryWidth, 36)
+        applyPasswordButton:SetPos(24 + entryWidth, 56); applyPasswordButton:SetSize(132, 36)
+        clearPasswordButton:SetPos(162 + entryWidth, 56); clearPasswordButton:SetSize(132, 36)
+    end
+    local passwordStatus = label(passwordPanel, "Current password status: checking…", "DermaDefault", C.muted)
+    passwordStatus:SetPos(0, 0); passwordStatus:SetSize(300, 1)
+    passwordPanel.Think = function()
+        if not IsValid(passwordStatus) then return end
+        for _, cv in ipairs(state.cvars or {}) do
+            if cv.name == "sv_password" then
+                local statusText = cv.value == "set" and "Password is set" or
+                    (cv.value == "unavailable" and "Password setting unavailable" or "No password set")
+                if passwordStatus:GetText() ~= "Current status: " .. statusText then
+                    passwordStatus:SetText("Current status: " .. statusText)
+                end
+                return
+            end
+        end
+    end
+
     local announceEntry = addInput(serverPage, "Broadcast announcement", "", "Message to display in all players' chat")
     local announceButton = button(serverPage, "Send announcement", C.blue, function()
         local message = string.Trim(announceEntry:GetValue() or "")
