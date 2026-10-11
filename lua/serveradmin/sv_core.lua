@@ -24,11 +24,15 @@ local function cleanText(value, maxLength)
 end
 
 local function isAdmin(ply)
-    return IsValid(ply) and ply:IsPlayer() and ply:IsAdmin()
+    if not IsValid(ply) or not ply:IsPlayer() then return false end
+    if ply:IsAdmin() then return true end
+    return ServerAdminULX and isfunction(ServerAdminULX.IsAdmin) and ServerAdminULX.IsAdmin(ply) == true
 end
 
 local function isSuperAdmin(ply)
-    return isAdmin(ply) and ply:IsSuperAdmin()
+    if not IsValid(ply) or not ply:IsPlayer() then return false end
+    if ply:IsSuperAdmin() then return true end
+    return ServerAdminULX and isfunction(ServerAdminULX.IsSuperAdmin) and ServerAdminULX.IsSuperAdmin(ply) == true
 end
 
 local function sendNotice(ply, ok, message)
@@ -839,11 +843,11 @@ local function targetIsProtected(ply, target, action)
         sendNotice(ply, false, "You cannot target yourself.")
         return true
     end
-    if target:IsSuperAdmin() and not isSuperAdmin(ply) then
+    if isSuperAdmin(target) and not isSuperAdmin(ply) then
         sendNotice(ply, false, "Only a superadmin can target a superadmin.")
         return true
     end
-    if target:IsAdmin() and not isSuperAdmin(ply) and
+    if isAdmin(target) and not isSuperAdmin(ply) and
         (action == "ban" or action == "kick" or action == "slay" or action == "setmoney" or
         action == "addmoney" or action == "setjob" or action == "ignite" or action == "strip" or
         action == "sethealth" or action == "setarmor") then
