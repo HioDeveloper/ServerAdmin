@@ -1091,11 +1091,22 @@ local function runAction(ply, action)
         RunConsoleCommand("changelevel", mapName)
     elseif action == "setcvar" then
         local name = cleanText(net.ReadString(), 64)
-        local value = cleanText(net.ReadString(), 80)
+        local rawValue = net.ReadString()
+        local value = tostring(rawValue or "")
         local item = CVAR_BY_NAME[name]
         if not item then sendNotice(ply, false, "This server variable is not allowed by ServerAdmin.") return end
         local cv = GetConVar(name)
         if not cv then sendNotice(ply, false, "Server variable is unavailable: " .. name) return end
+        if item.kind == "secret" then
+            if #value > (item.maxLength or 64) then sendNotice(ply, false, "Password must be 64 characters or fewer.") return end
+            if string.find(value, "[%c;]") then
+                sendNotice(ply, false, "Password cannot contain control characters or semicolons.")
+                return
+            end
+            value = string.Trim(value)
+        else
+            value = cleanText(value, 80)
+        end
         if item.kind == "bool" then
             if value ~= "0" and value ~= "1" then sendNotice(ply, false, "Boolean values must be 0 or 1.") return end
         elseif item.kind == "number" then
