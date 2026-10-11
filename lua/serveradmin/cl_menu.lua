@@ -1289,8 +1289,15 @@ local function buildPanel()
     passwordPanel.Think = function()
         for _, cv in ipairs(state.cvars or {}) do
             if cv.name == "sv_password" then
-                passwordStatusText = cv.value == "set" and "set" or
-                    (cv.value == "unavailable" and "unavailable" or "not set")
+                if cv.value == "set" then
+                    passwordStatusText = "set (last set in ServerAdmin)"
+                elseif cv.value == "not set" then
+                    passwordStatusText = "not set (last cleared in ServerAdmin)"
+                elseif cv.value == "status hidden" then
+                    passwordStatusText = "status hidden by engine; writes enabled"
+                else
+                    passwordStatusText = "unavailable"
+                end
                 return
             end
         end
@@ -1323,7 +1330,7 @@ local function buildPanel()
             if cv.name == selectedCvar then
                 if IsValid(cvarEntry) then cvarEntry:SetText(cv.kind == "secret" and "" or (cv.value == "unavailable" and "" or cv.value)) end
                 if IsValid(cvarHint) then
-                    cvarHint:SetText(cv.kind == "secret" and "Password is never sent to the client. Leave empty to clear it." or
+                    cvarHint:SetText(cv.kind == "secret" and "Password is never sent to the client. Engine status may be hidden; leave empty to clear it." or
                         (cv.kind == "bool" and "Use 0 or 1." or "Numeric values are range-checked on the server."))
                 end
                 break
