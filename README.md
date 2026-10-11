@@ -1,6 +1,6 @@
 # ServerAdmin
 
-ServerAdmin is a full-screen, in-game administration centre for Garry's Mod (v3.1.0). It uses native Derma UI and server-authoritative networking; it is not a remote web panel and it does not require ULX.
+ServerAdmin is a full-screen, in-game administration centre for Garry's Mod (v3.2.0). It uses native Derma UI and server-authoritative networking; it is not a remote web panel and it does not require ULX.
 
 ## Installation
 
