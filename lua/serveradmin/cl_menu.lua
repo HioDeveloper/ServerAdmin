@@ -624,14 +624,22 @@ local function buildPanel()
     local assignGroupCombo = vgui.Create("DComboBox", userBar)
     assignGroupCombo:SetPos(0, 6); assignGroupCombo:SetSize(230, 32); assignGroupCombo:SetValue("Assign group")
     assignGroupCombo.OnSelect = function(_, _, value, data) selectedAssignGroup = data or value end
-    local assignButton = button(userBar, "Assign group to selected player", C.blue, function()
-        if not selectedSteamID64 then notify("Select a connected player first.", false); return end
+    local userIdentityEntry = vgui.Create("DTextEntry", userBar)
+    userIdentityEntry:SetPos(0, 6); userIdentityEntry:SetSize(230, 32)
+    userIdentityEntry:SetPlaceholderText("Offline SteamID / SteamID64")
+    local assignButton = button(userBar, "Assign group", C.blue, function()
+        local identity = string.Trim(userIdentityEntry:GetValue() or "")
+        if identity == "" then identity = tostring(selectedSteamID64 or "") end
+        if identity == "" then
+            notify("Select a player or enter a SteamID / SteamID64.", false)
+            return
+        end
         requestULX("assign_group", function()
-            net.WriteString(selectedSteamID64)
+            net.WriteString(identity)
             net.WriteString(selectedAssignGroup or "user")
         end)
     end, 32)
-    assignButton:SetPos(240, 6); assignButton:SetSize(235, 32)
+    assignButton:SetPos(240, 6); assignButton:SetSize(155, 32)
 
     local accessBar = vgui.Create("DPanel", groupsPage)
     accessBar:Dock(TOP); accessBar:SetTall(44); accessBar:DockMargin(0, 0, 0, 8); accessBar.Paint = nil
@@ -685,7 +693,7 @@ local function buildPanel()
     end
     local connectedList = vgui.Create("DListView", listsPanel)
     connectedList:Dock(FILL)
-    connectedList:AddColumn("Connected player"):SetFixedWidth(180)
+    connectedList:AddColumn("Player / offline ID"):SetFixedWidth(180)
     connectedList:AddColumn("Group"):SetFixedWidth(105)
     connectedList:AddColumn("SteamID64")
     styleListView(connectedList)
