@@ -2,7 +2,7 @@
 -- All client input is treated as untrusted. Do not replace the cvar allow-list with arbitrary commands.
 
 ServerAdmin = ServerAdmin or {}
-ServerAdmin.Version = "3.2.0"
+ServerAdmin.Version = "3.2.1"
 
 local NET = "serveradmin_net"
 util.AddNetworkString(NET)
