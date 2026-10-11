@@ -435,7 +435,15 @@ register("ban", 50, "Ban online player(s). Minutes 0 = permanent. Usage: ulx ban
     if reason == "" then reason = "Banned by an administrator" end
     local count = eachTarget(ply, args[1], function(target)
         if target:IsBot() or not validSteamID(target:SteamID()) then error("Only real Steam players can be banned.") end
-        local name, sid = target:Nick(), target:SteamID()
+        if target == ply and IsValid(ply) and ply:IsPlayer() then error("You cannot ban yourself.") end
+        local name, sid, sid64 = target:Nick(), target:SteamID(), target:SteamID64()
+        local now = os.time()
+        local expires = minutes > 0 and (now + minutes * 60) or 0
+        local actor = IsValid(ply) and ply:IsPlayer() and (ply:Nick() .. " [" .. ply:SteamID() .. "]") or "Console"
+        sql.Query("INSERT INTO serveradmin_bans (steamid, steamid64, name, reason, actor, created, expires, active) VALUES (" ..
+            sql.SQLStr(sid) .. ", " .. sql.SQLStr(sid64) .. ", " .. sql.SQLStr(clean(name, 64)) .. ", " ..
+            sql.SQLStr(reason) .. ", " .. sql.SQLStr(clean(actor, 90)) .. ", " .. tostring(now) .. ", " ..
+            tostring(expires) .. ", 1)")
         target:Ban(minutes, false)
         timer.Simple(0, function() RunConsoleCommand("writeid") end)
         target:Kick(reason)
@@ -451,6 +459,12 @@ register("banid", 100, "Ban an offline SteamID. Usage: ulx banid <STEAM_ID> <min
     local minutes = minutesArg(args, 2)
     if not minutes then tell(ply, "Minutes must be a number from 0 to 525600 (0 = permanent)."); return end
     local reason = clean(rest(args, 3), 160)
+    local now = os.time()
+    local expires = minutes > 0 and (now + minutes * 60) or 0
+    local actor = IsValid(ply) and ply:IsPlayer() and (ply:Nick() .. " [" .. ply:SteamID() .. "]") or "Console"
+    sql.Query("INSERT INTO serveradmin_bans (steamid, steamid64, name, reason, actor, created, expires, active) VALUES (" ..
+        sql.SQLStr(sid) .. ", '', " .. sql.SQLStr(sid) .. ", " .. sql.SQLStr(reason) .. ", " ..
+        sql.SQLStr(clean(actor, 90)) .. ", " .. tostring(now) .. ", " .. tostring(expires) .. ", 1)")
     RunConsoleCommand("banid", tostring(minutes), sid)
     RunConsoleCommand("writeid")
     logAction(ply, "banid", sid, tostring(minutes) .. " minute(s): " .. reason)
@@ -463,18 +477,43 @@ register("unban", 100, "Remove a native ban. Usage: ulx unban <STEAM_ID>", funct
     if not validSteamID(sid) then tell(ply, "A valid SteamID is required."); return end
     RunConsoleCommand("removeid", sid)
     RunConsoleCommand("writeid")
+    sql.Query("UPDATE serveradmin_bans SET active = 0 WHERE steamid = " .. sql.SQLStr(sid))
     logAction(ply, "unban", sid, "Native ban removed")
     tell(ply, "Unban command sent for " .. sid .. ".")
 end, {"removeban"})
 
-register("banlist", 50, "Show recent native ban IDs as stored by the game.", function(ply)
-    tell(ply, "Ban list is stored by Garry's Mod in cfg/banned_user.cfg; this command does not rewrite that file.")
-    if IsValid(ply) and ply:IsPlayer() then ply:ChatPrint("Use 'ulx unban <STEAM_ID>' to remove a specific SteamID ban.") end
+register("warn", 50, "Store a persistent warning and notify target(s). Usage: ulx warn <player> <reason>", function(ply, args)
+    if not requireArgs(ply, args, 2, "warn <player> <reason>") then return end
+    local reason = clean(rest(args, 2), 160)
+    if reason == "" then tell(ply, "Usage: ulx warn <player> <reason>"); return end
+    local count = eachTarget(ply, args[1], function(target)
+        local actor = IsValid(ply) and ply:IsPlayer() and (ply:Nick() .. " [" .. ply:SteamID() .. "]") or "Console"
+        sql.Query("INSERT INTO serveradmin_warnings (steamid, name, reason, actor, created) VALUES (" ..
+            sql.SQLStr(target:SteamID()) .. ", " .. sql.SQLStr(clean(target:Nick(), 64)) .. ", " ..
+            sql.SQLStr(reason) .. ", " .. sql.SQLStr(clean(actor, 90)) .. ", " .. tostring(os.time()) .. ")")
+        target:ChatPrint("[ServerAdmin] Warning: " .. reason)
+        logAction(ply, "warn", target:Nick() .. " [" .. target:SteamID() .. "]", reason)
+    end)
+    if count > 0 then tell(ply, "Warned " .. count .. " player(s).") end
+end)
+
+register("banlist", 50, "Show recent ServerAdmin/ULX ban records.", function(ply)
+    local rows = sql.Query("SELECT steamid, name, reason, actor, expires, active FROM serveradmin_bans ORDER BY id DESC LIMIT 25")
+    if not istable(rows) then tell(ply, "Could not read ban history: " .. tostring(sql.LastError())); return end
+    tell(ply, "Recent ban records: " .. #rows)
+    for _, row in ipairs(rows) do
+        local status = tonumber(row.active) == 1 and "ACTIVE" or "EXPIRED/REMOVED"
+        local expiry = tonumber(row.expires) or 0
+        local expiresText = expiry == 0 and "permanent" or os.date("%Y-%m-%d %H:%M", expiry)
+        tell(ply, status .. " | " .. clean(row.name, 64) .. " | " .. clean(row.steamid, 32) ..
+            " | " .. clean(row.reason, 100) .. " | by " .. clean(row.actor, 64) .. " | " .. expiresText)
+    end
 end)
 
 register("slay", 50, "Kill target player(s). Usage: ulx slay <player>", function(ply, args)
     if not requireArgs(ply, args, 1, "slay <player>") then return end
     local count = eachTarget(ply, args[1], function(target)
+        if target == ply and IsValid(ply) and ply:IsPlayer() then error("You cannot slay yourself.") end
         local name = target:Nick()
         target:Kill()
         logAction(ply, "slay", name, "")
@@ -745,8 +784,8 @@ register("speed", 50, "Set walk and run speed. Usage: ulx speed <player> <value>
         setMoveSpeed(target, speed, speed, nil)
         logAction(ply, "speed", target:Nick(), tostring(speed))
     end)
-    if count > 0 then tell(ply, "Speed updated for " .. count .. " player(s).")
-end end)
+    if count > 0 then tell(ply, "Speed updated for " .. count .. " player(s).") end
+end)
 
 register("jump", 50, "Set jump power. Usage: ulx jump <player> <value>", function(ply, args)
     if not requireArgs(ply, args, 2, "jump <player> <value>") then return end
