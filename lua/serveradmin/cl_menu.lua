@@ -2,6 +2,9 @@
 ServerAdmin = ServerAdmin or {}
 
 local NET = "serveradmin_net"
+local ULX_NET = "serveradmin_ulx_net"
+local ulxState = { groups = {}, users = {}, commands = {} }
+local refreshULXGroupPage
 local C = {
     bg = Color(10, 13, 19), sidebar = Color(16, 20, 29), panel = Color(21, 27, 38),
     panel2 = Color(29, 37, 51), border = Color(48, 60, 80), text = Color(237, 242, 250),
@@ -23,6 +26,13 @@ local activePage = "overview"
 
 local function request(action, writer)
     net.Start(NET)
+        net.WriteString(action)
+        if writer then writer() end
+    net.SendToServer()
+end
+
+local function requestULX(action, writer)
+    net.Start(ULX_NET)
         net.WriteString(action)
         if writer then writer() end
     net.SendToServer()
@@ -508,6 +518,8 @@ local function buildPanel()
             request("refresh")
         elseif key == "motd" then
             request("motd_get")
+        elseif key == "groups" then
+            requestULX("snapshot")
         end
     end
     local function addNav(text, key, y)
@@ -543,6 +555,132 @@ local function buildPanel()
     addNav("Server controls", "server", 330)
     addNav("Analytics & diagnostics", "diagnostics", 376)
     addNav("MOTD & RCON", "motd", 422)
+    addNav("ULX groups & access", "groups", 468)
+
+    -- ULX-compatible group and access editor
+    local groupsPage = makePage("groups")
+    addSection(groupsPage, "ULX groups & access", "Persistent roles, immunity and per-command permissions. Group changes are checked on the server.")
+    local selectedGroupName, selectedSteamID64 = nil, nil
+    local selectedAssignGroup, selectedAccessCommand, selectedAccessMode = "user", "help", 0
+
+    local groupBar = vgui.Create("DPanel", groupsPage)
+    groupBar:Dock(TOP); groupBar:SetTall(48); groupBar:DockMargin(0, 8, 0, 6); groupBar.Paint = nil
+    local groupNameEntry = vgui.Create("DTextEntry", groupBar)
+    groupNameEntry:SetPos(0, 7); groupNameEntry:SetSize(145, 32); groupNameEntry:SetPlaceholderText("New group name")
+    local groupImmunityEntry = vgui.Create("DTextEntry", groupBar)
+    groupImmunityEntry:SetPos(151, 7); groupImmunityEntry:SetSize(70, 32); groupImmunityEntry:SetText("25")
+    local parentCombo = vgui.Create("DComboBox", groupBar)
+    parentCombo:SetPos(227, 7); parentCombo:SetSize(130, 32); parentCombo:SetValue("Parent: user")
+    local createGroupButton = button(groupBar, "Create group", C.green, function()
+        local name = string.Trim(groupNameEntry:GetValue() or "")
+        local immunity = tonumber(groupImmunityEntry:GetValue() or "")
+        if name == "" or not immunity or immunity < 0 or immunity > 99 then
+            notify("Enter a group name and immunity from 0 to 99.", false)
+            return
+        end
+        requestULX("create_group", function()
+            net.WriteString(name)
+            net.WriteUInt(math.floor(immunity), 10)
+            net.WriteString(parentCombo.serveradminSelected or "user")
+        end)
+    end, 32)
+    createGroupButton:SetPos(364, 7); createGroupButton:SetSize(112, 32)
+    local deleteGroupButton = button(groupBar, "Delete selected", C.red, function()
+        if not selectedGroupName then notify("Select a group first.", false); return end
+        Derma_Query("Delete group '" .. selectedGroupName .. "'? Assigned users will move to user.", "Delete group",
+            "Delete", function() requestULX("delete_group", function() net.WriteString(selectedGroupName) end) end, "Cancel")
+    end, 32)
+    deleteGroupButton:SetPos(482, 7); deleteGroupButton:SetSize(130, 32)
+
+    local userBar = vgui.Create("DPanel", groupsPage)
+    userBar:Dock(TOP); userBar:SetTall(44); userBar:DockMargin(0, 0, 0, 6); userBar.Paint = nil
+    local assignGroupCombo = vgui.Create("DComboBox", userBar)
+    assignGroupCombo:SetPos(0, 6); assignGroupCombo:SetSize(230, 32); assignGroupCombo:SetValue("Assign group")
+    assignGroupCombo.OnSelect = function(_, _, value, data) selectedAssignGroup = data or value end
+    local assignButton = button(userBar, "Assign group to selected player", C.blue, function()
+        if not selectedSteamID64 then notify("Select a connected player first.", false); return end
+        requestULX("assign_group", function()
+            net.WriteString(selectedSteamID64)
+            net.WriteString(selectedAssignGroup or "user")
+        end)
+    end, 32)
+    assignButton:SetPos(240, 6); assignButton:SetSize(235, 32)
+
+    local accessBar = vgui.Create("DPanel", groupsPage)
+    accessBar:Dock(TOP); accessBar:SetTall(44); accessBar:DockMargin(0, 0, 0, 8); accessBar.Paint = nil
+    local accessGroupLabel = label(accessBar, "Group", "DermaDefaultBold", C.muted)
+    accessGroupLabel:SetPos(0, 15); accessGroupLabel:SetSize(42, 18)
+    local accessGroupCombo = vgui.Create("DComboBox", accessBar)
+    accessGroupCombo:SetPos(44, 6); accessGroupCombo:SetSize(145, 32); accessGroupCombo:SetValue("Select group")
+    accessGroupCombo.OnSelect = function(_, _, value, data) selectedGroupName = data or value end
+    local accessCommandCombo = vgui.Create("DComboBox", accessBar)
+    accessCommandCombo:SetPos(195, 6); accessCommandCombo:SetSize(170, 32); accessCommandCombo:SetValue("Select command")
+    accessCommandCombo.OnSelect = function(_, _, value, data) selectedAccessCommand = data or value end
+    local accessModeCombo = vgui.Create("DComboBox", accessBar)
+    accessModeCombo:SetPos(371, 6); accessModeCombo:SetSize(115, 32); accessModeCombo:SetValue("Inherit")
+    accessModeCombo:AddChoice("Inherit", 0)
+    accessModeCombo:AddChoice("Allow", 1)
+    accessModeCombo:AddChoice("Deny", 2)
+    accessModeCombo.OnSelect = function(_, _, value, data) selectedAccessMode = tonumber(data) or 0 end
+    local accessButton = button(accessBar, "Save permission", C.cyan, function()
+        if not selectedGroupName or not selectedAccessCommand then
+            notify("Select a group and a command.", false)
+            return
+        end
+        requestULX("set_group_access", function()
+            net.WriteString(selectedGroupName)
+            net.WriteString(selectedAccessCommand)
+            net.WriteUInt(selectedAccessMode or 0, 2)
+        end)
+    end, 32)
+    accessButton:SetPos(493, 6); accessButton:SetSize(130, 32)
+
+    local listsPanel = vgui.Create("DPanel", groupsPage)
+    listsPanel:Dock(FILL); listsPanel.Paint = nil
+    local groupList = vgui.Create("DListView", listsPanel)
+    groupList:Dock(LEFT); groupList:SetWide(330); groupList:DockMargin(0, 0, 8, 0)
+    groupList:AddColumn("Group"):SetFixedWidth(120)
+    groupList:AddColumn("Immunity"):SetFixedWidth(80)
+    groupList:AddColumn("Parent")
+    styleListView(groupList)
+    groupList.OnRowSelected = function(_, _, row) selectedGroupName = row.serveradminGroupName end
+    local connectedList = vgui.Create("DListView", listsPanel)
+    connectedList:Dock(FILL)
+    connectedList:AddColumn("Connected player"):SetFixedWidth(180)
+    connectedList:AddColumn("Group"):SetFixedWidth(105)
+    connectedList:AddColumn("SteamID64")
+    styleListView(connectedList)
+    connectedList.OnRowSelected = function(_, _, row) selectedSteamID64 = row.serveradminSteamID64 end
+
+    refreshULXGroupPage = function()
+        if not IsValid(groupsPage) then return end
+        groupList:Clear()
+        connectedList:Clear()
+        parentCombo:Clear()
+        assignGroupCombo:Clear()
+        accessGroupCombo:Clear()
+        accessCommandCombo:Clear()
+        for _, group in ipairs(ulxState.groups or {}) do
+            local line = groupList:AddLine(group.name, tostring(group.immunity), group.parent ~= "" and group.parent or "—")
+            line.serveradminGroupName = group.name
+            parentCombo:AddChoice(group.name, group.name, group.name == "user")
+            assignGroupCombo:AddChoice(group.name, group.name, group.name == "user")
+            accessGroupCombo:AddChoice(group.name, group.name, group.name == (selectedGroupName or "user"))
+        end
+        if not selectedGroupName then selectedGroupName = "user" end
+        parentCombo.serveradminSelected = "user"
+        for _, group in ipairs(ulxState.groups or {}) do
+            if group.name == "user" then parentCombo:ChooseOption("user"); break end
+        end
+        for _, command in ipairs(ulxState.commands or {}) do
+            accessCommandCombo:AddChoice(command.name, command.name, command.name == "help")
+        end
+        accessCommandCombo:ChooseOption(selectedAccessCommand or "help")
+        for _, playerData in ipairs(ulxState.users or {}) do
+            local line = connectedList:AddLine(playerData.name, playerData.group, playerData.steamid64)
+            line.serveradminSteamID64 = playerData.steamid64
+        end
+    end
 
     -- Dashboard
     local overview = makePage("overview")
@@ -1527,8 +1665,22 @@ net.Receive(NET, function()
     refreshPlayerList()
 end)
 
+
+net.Receive(ULX_NET, function()
+    local kind = net.ReadString()
+    if kind ~= "snapshot" then return end
+    local payload = net.ReadString()
+    local decoded = util.JSONToTable(payload or "")
+    if not istable(decoded) or not istable(decoded.groups) or not istable(decoded.users) or not istable(decoded.commands) then
+        ErrorNoHalt("[ServerAdmin] Received invalid ULX group snapshot.\\n")
+        return
+    end
+    ulxState = decoded
+    if refreshULXGroupPage then refreshULXGroupPage() end
+end)
+
 local function openPanel()
-    if not LocalPlayer():IsAdmin() then
+    if not LocalPlayer():IsAdmin() and not LocalPlayer():GetNWBool("ServerAdminULXIsAdmin", false) then
         notify("You do not have permission to use ServerAdmin.", false)
         return
     end
