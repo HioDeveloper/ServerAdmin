@@ -4,7 +4,7 @@
 
 ServerAdminULX = ServerAdminULX or {}
 local U = ServerAdminULX
-U.Version = "1.0.0"
+U.Version = "1.1.0"
 
 if not SERVER then return end
 
@@ -94,6 +94,7 @@ loadStore()
 local COMMANDS, ALIASES = {}, {}
 local CHAT_MUTES, CHAT_GAGS, FROZEN, BLINDED, CLOAKED = {}, {}, {}, {}, {}
 local GIMPed, NOCLIPPED = {}, {}
+local SPECTATING = {}
 local ORIGINAL_MOVEMENT, ORIGINAL_JAIL_POS = {}, {}
 local currentVote, voteSerial = nil, 0
 
@@ -580,7 +581,7 @@ register("goto", 50, "Teleport yourself to a player. Usage: ulx goto <player>", 
     ply:SetPos(target:GetPos() + target:GetForward() * 72 + Vector(0, 0, 8))
     logAction(ply, "goto", target:Nick(), "")
     tell(ply, "Teleported to " .. target:Nick() .. ".")
-end, {"teleportto"})
+end, {"teleportto", "teleport"})
 
 register("send", 50, "Send a player to another player. Usage: ulx send <player> <destination>", function(ply, args)
     if not requireArgs(ply, args, 2, "send <player> <destination>") then return end
@@ -995,7 +996,7 @@ register("adminchat", 0, "Send a message to connected administrators. Usage: ulx
         if U.GetImmunity(target) >= 50 then target:ChatPrint("[Admin Chat] " .. actor .. ": " .. message) end
     end
     tell(ply, "Admin chat message sent.")
-end, {"ac"})
+end, {"ac", "asay"})
 
 register("vote", 50, "Start a yes/no poll. Usage: ulx vote <question>", function(ply, args)
     local question = clean(rest(args, 1), 140)
@@ -1101,6 +1102,197 @@ register("no", 0, "Vote no in the current poll.", function(ply)
     if currentVote.yes[id] or currentVote.no[id] then tell(ply, "You have already voted."); return end
     currentVote.no[id] = true
     tell(ply, "Vote registered: NO.")
+end)
+
+
+-- Additional ULX-style utilities: player models, weapon/ammo delivery, DarkRP jobs,
+-- spectating, ban lookup and a tightly allow-listed cvar manager.
+register("setmodel", 75, "Set a player's model. Usage: ulx setmodel <player> <models/path.mdl>", function(ply, args)
+    if not requireArgs(ply, args, 2, "setmodel <player> <models/path.mdl>") then return end
+    local model = tostring(args[2] or "")
+    if #model > 180 or not string.match(model, "^models/[%w_/%-%.]+%.mdl$") or
+        string.find(model, "..", 1, true) or not file.Exists(model, "GAME") or
+        (util.IsValidModel and not util.IsValidModel(model)) then
+        tell(ply, "Model path is invalid or the model is not mounted on the server.")
+        return
+    end
+    util.PrecacheModel(model)
+    local count = eachTarget(ply, args[1], function(target)
+        target:SetModel(model)
+        logAction(ply, "setmodel", target:Nick(), model)
+    end)
+    if count > 0 then tell(ply, "Model updated for " .. count .. " player(s).") end
+end, {"model"})
+
+register("give", 50, "Give a registered weapon class. Usage: ulx give <player> <weapon_class>", function(ply, args)
+    if not requireArgs(ply, args, 2, "give <player> <weapon_class>") then return end
+    local class = clean(args[2], 64)
+    if not string.match(class, "^[%w_%-]+$") or not weapons.Get(class) then
+        tell(ply, "That weapon class is not registered.")
+        return
+    end
+    local count = eachTarget(ply, args[1], function(target)
+        local given = target:Give(class)
+        if not IsValid(given) then error("The weapon could not be given.") end
+        logAction(ply, "give", target:Nick(), class)
+    end)
+    if count > 0 then tell(ply, "Weapon given to " .. count .. " player(s).") end
+end)
+
+register("giveammo", 50, "Give reserve ammo for a player's active weapon. Usage: ulx giveammo <player> [amount]", function(ply, args)
+    local amount = math.floor(parseNumber(args[2], 1, 1000, 120))
+    local count = eachTarget(ply, args[1], function(target)
+        local weapon = target:GetActiveWeapon()
+        if not IsValid(weapon) then error("Player has no active weapon.") end
+        local ammoType = weapon:GetPrimaryAmmoType()
+        if not ammoType or ammoType < 0 then error("Active weapon has no primary ammo type.") end
+        target:GiveAmmo(amount, ammoType, true)
+        logAction(ply, "giveammo", target:Nick(), tostring(amount))
+    end)
+    if count > 0 then tell(ply, "Ammo supplied to " .. count .. " player(s).") end
+end, {"givebullets"})
+
+register("setjob", 75, "Change a player's DarkRP job by ID or command. Usage: ulx setjob <player> <job_id|command>", function(ply, args)
+    if not requireArgs(ply, args, 2, "setjob <player> <job_id|command>") then return end
+    if not istable(RPExtraTeams) then tell(ply, "DarkRP jobs are not available on this server."); return end
+    local query = tostring(args[2] or "")
+    local jobID = tonumber(query)
+    if not jobID then
+        local lower = string.lower(query)
+        for id, job in pairs(RPExtraTeams) do
+            if istable(job) and (string.lower(tostring(job.command or "")) == lower or string.lower(tostring(job.name or "")) == lower) then
+                jobID = tonumber(id)
+                break
+            end
+        end
+    end
+    if not jobID or not istable(RPExtraTeams[jobID]) then
+        tell(ply, "DarkRP job was not found. Use a job ID or its chat command.")
+        return
+    end
+    local count = eachTarget(ply, args[1], function(target)
+        if not isfunction(target.changeTeam) then error("This DarkRP version does not expose changeTeam.") end
+        target:changeTeam(jobID, true, true)
+        logAction(ply, "setjob", target:Nick(), tostring(jobID) .. " (" .. clean(RPExtraTeams[jobID].command or "", 32) .. ")")
+    end)
+    if count > 0 then tell(ply, "DarkRP job change requested for " .. count .. " player(s).") end
+end, {"job"})
+
+register("spectate", 75, "Put a player into roaming spectator mode. Usage: ulx spectate <player>", function(ply, args)
+    local count = eachTarget(ply, args[1], function(target)
+        if not SPECTATING[target] then
+            SPECTATING[target] = { pos = target:GetPos(), moveType = target:GetMoveType() }
+        end
+        target:Spectate(OBS_MODE_ROAMING)
+        target:SpectateEntity(NULL)
+        logAction(ply, "spectate", target:Nick(), "enabled")
+    end)
+    if count > 0 then tell(ply, "Spectator mode enabled for " .. count .. " player(s).") end
+end)
+
+register("unspectate", 75, "Return a player from spectator mode. Usage: ulx unspectate <player>", function(ply, args)
+    local count = eachTarget(ply, args[1], function(target)
+        local saved = SPECTATING[target]
+        target:UnSpectate()
+        if saved then
+            if isvector(saved.pos) then target:SetPos(saved.pos) end
+            target:SetMoveType(saved.moveType or MOVETYPE_WALK)
+        elseif target:GetMoveType() == MOVETYPE_OBSERVER then
+            target:SetMoveType(MOVETYPE_WALK)
+        end
+        SPECTATING[target] = nil
+        logAction(ply, "spectate", target:Nick(), "disabled")
+    end)
+    if count > 0 then tell(ply, "Spectator mode disabled for " .. count .. " player(s).") end
+end, {"unspec"})
+
+register("baninfo", 50, "Look up the latest ServerAdmin ban record. Usage: ulx baninfo <SteamID|SteamID64>", function(ply, args)
+    if not requireArgs(ply, args, 1, "baninfo <SteamID|SteamID64>") then return end
+    local identity = clean(args[1], 32)
+    if not validSteamID(identity) and not validSteamID64(identity) then
+        tell(ply, "Provide a valid SteamID or SteamID64.")
+        return
+    end
+    local rows = sql.Query("SELECT steamid, steamid64, name, reason, actor, created, expires, active FROM serveradmin_bans WHERE steamid = " ..
+        sql.SQLStr(identity) .. " OR steamid64 = " .. sql.SQLStr(identity) .. " ORDER BY id DESC LIMIT 1")
+    if not istable(rows) or not rows[1] then
+        tell(ply, istable(rows) and "No ServerAdmin ban record exists for that identity." or ("Ban lookup failed: " .. tostring(sql.LastError())))
+        return
+    end
+    local row = rows[1]
+    local expires = tonumber(row.expires) or 0
+    local expiresText = expires == 0 and "Permanent" or os.date("%Y-%m-%d %H:%M:%S", expires)
+    tell(ply, "Ban record: " .. clean(row.name, 64) .. " | " .. clean(row.steamid, 32) ..
+        " | " .. (tonumber(row.active) == 1 and "ACTIVE" or "INACTIVE") ..
+        " | reason: " .. clean(row.reason, 140) .. " | by: " .. clean(row.actor, 80) ..
+        " | created: " .. os.date("%Y-%m-%d %H:%M:%S", tonumber(row.created) or 0) ..
+        " | expires: " .. expiresText)
+end, {"banlookup"})
+
+local ULX_CVAR_ALLOWLIST = {
+    sv_gravity = { kind = "number", min = 0, max = 2000 },
+    host_timescale = { kind = "number", min = 0.1, max = 3 },
+    hostname = { kind = "string", maxLength = 100 },
+    sv_alltalk = { kind = "bool" },
+    sv_voiceenable = { kind = "bool" },
+    mp_friendlyfire = { kind = "bool" },
+    sbox_maxprops = { kind = "integer", min = 0, max = 10000 },
+    sbox_maxragdolls = { kind = "integer", min = 0, max = 10000 },
+    sbox_maxnpcs = { kind = "integer", min = 0, max = 10000 },
+    sbox_maxballoons = { kind = "integer", min = 0, max = 10000 },
+    sbox_maxeffects = { kind = "integer", min = 0, max = 10000 },
+    sbox_maxdynamite = { kind = "integer", min = 0, max = 10000 },
+    sbox_maxlamps = { kind = "integer", min = 0, max = 10000 },
+    sbox_maxthrusters = { kind = "integer", min = 0, max = 10000 },
+    sbox_maxwheels = { kind = "integer", min = 0, max = 10000 },
+    sbox_maxhoverballs = { kind = "integer", min = 0, max = 10000 },
+    sbox_maxvehicles = { kind = "integer", min = 0, max = 10000 },
+    sbox_maxbuttons = { kind = "integer", min = 0, max = 10000 },
+    sbox_maxemitters = { kind = "integer", min = 0, max = 10000 }
+}
+
+register("cvar", 100, "Read or set an allow-listed server cvar. Usage: ulx cvar <name> [value]", function(ply, args)
+    if not requireArgs(ply, args, 1, "cvar <name> [value]") then return end
+    local name = string.lower(clean(args[1], 48))
+    local definition = ULX_CVAR_ALLOWLIST[name]
+    if not definition then
+        tell(ply, "Cvar is not in the ServerAdmin allow-list. Use ulx cvars to list supported names.")
+        return
+    end
+    local cvar = GetConVar(name)
+    if not cvar then tell(ply, "Cvar '" .. name .. "' is not available in this gamemode/server build."); return end
+    if args[2] == nil then
+        tell(ply, name .. " = " .. clean(cvar:GetString(), 100))
+        return
+    end
+
+    local value = clean(rest(args, 2), definition.maxLength or 32)
+    if definition.kind == "string" then
+        if value == "" then tell(ply, "Value cannot be empty."); return end
+    elseif definition.kind == "bool" then
+        local normalized = string.lower(value)
+        if normalized == "true" or normalized == "on" then value = "1"
+        elseif normalized == "false" or normalized == "off" then value = "0" end
+        if value ~= "0" and value ~= "1" then tell(ply, "Boolean cvars accept only 0/1, true/false or on/off."); return end
+    else
+        local number = tonumber(value)
+        if not number or number ~= number or number < definition.min or number > definition.max then
+            tell(ply, "Value is outside the allowed range for " .. name .. ".")
+            return
+        end
+        if definition.kind == "integer" then number = math.floor(number) end
+        value = tostring(number)
+    end
+    cvar:SetString(value)
+    logAction(ply, "cvar", name, value)
+    tell(ply, name .. " updated to " .. value .. ".")
+end)
+
+register("cvars", 100, "List cvars supported by the ServerAdmin allow-list.", function(ply)
+    local names = {}
+    for name in pairs(ULX_CVAR_ALLOWLIST) do names[#names + 1] = name end
+    table.sort(names)
+    tell(ply, "Supported cvars: " .. table.concat(names, ", "))
 end)
 
 -- Persistent user groups and access control
@@ -1494,7 +1686,7 @@ end)
 
 hook.Add("PlayerDisconnected", "ServerAdminULX_ClearState", function(ply)
     CHAT_MUTES[ply], CHAT_GAGS[ply], FROZEN[ply], BLINDED[ply], CLOAKED[ply] = nil, nil, nil, nil, nil
-    GIMPed[ply], NOCLIPPED[ply] = nil, nil
+    GIMPed[ply], NOCLIPPED[ply], SPECTATING[ply] = nil, nil, nil
     ORIGINAL_MOVEMENT[ply], ORIGINAL_JAIL_POS[ply] = nil, nil
     if currentVote then
         local id = keyFor(ply)
