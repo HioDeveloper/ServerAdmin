@@ -543,7 +543,7 @@ end
 
 local CVARS = {
     { name = "sv_gravity", kind = "number", min = 0, max = 2000 },
-    { name = "sv_password", kind = "secret", maxLength = 64 },
+    { name = "sv_password", kind = "secret", maxLength = 64, allowWriteWhenUnavailable = true, hideReadState = true },
     { name = "sv_alltalk", kind = "bool" },
     { name = "sv_voiceenable", kind = "bool" },
     { name = "sv_lan", kind = "bool" },
@@ -571,8 +571,19 @@ local CVAR_BY_NAME = {}
 for _, item in ipairs(CVARS) do CVAR_BY_NAME[item.name] = item end
 
 local function readCvar(item)
+    -- Engine-protected values such as sv_password may deliberately be hidden from GetConVar.
+    -- Never try to send secret text to clients: report only our last applied status, if known.
+    if item.kind == "secret" and item.hideReadState then
+        if ServerAdmin.PasswordStatusKnown == true then
+            return ServerAdmin.PasswordIsSet == true and "set" or "not set"
+        end
+        return "status hidden"
+    end
+
     local cv = GetConVar(item.name)
-    if not cv then return "unavailable" end
+    if not cv then
+        return item.allowWriteWhenUnavailable and "status hidden" or "unavailable"
+    end
     if item.kind == "secret" then return cv:GetString() ~= "" and "set" or "not set" end
     return cleanText(cv:GetString(), 80)
 end
@@ -1096,7 +1107,13 @@ local function runAction(ply, action)
         local item = CVAR_BY_NAME[name]
         if not item then sendNotice(ply, false, "This server variable is not allowed by ServerAdmin.") return end
         local cv = GetConVar(name)
-        if not cv then sendNotice(ply, false, "Server variable is unavailable: " .. name) return end
+        -- Some engine-owned protected convars cannot be queried with GetConVar but can still
+        -- be written through their console command. Only explicitly allow-listed entries may
+        -- opt into this write-only fallback.
+        if not cv and item.allowWriteWhenUnavailable ~= true then
+            sendNotice(ply, false, "Server variable is unavailable: " .. name)
+            return
+        end
         if item.kind == "secret" then
             if #value > (item.maxLength or 64) then sendNotice(ply, false, "Password must be 64 characters or fewer.") return end
             if string.find(value, "[%c;]") then
@@ -1120,6 +1137,10 @@ local function runAction(ply, action)
             if #value > (item.maxLength or 64) then sendNotice(ply, false, "Value is too long.") return end
         end
         RunConsoleCommand(name, value)
+        if item.kind == "secret" and item.allowWriteWhenUnavailable == true then
+            ServerAdmin.PasswordStatusKnown = true
+            ServerAdmin.PasswordIsSet = value ~= ""
+        end
         audit(ply, "server setting changed", nil, name .. " = " .. (item.kind == "secret" and (value == "" and "(cleared)" or "(updated)") or value))
         sendNotice(ply, true, name .. " updated.")
         -- Refresh the client's read-only status values immediately (never the secret itself).
