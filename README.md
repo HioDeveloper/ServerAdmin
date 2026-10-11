@@ -1,6 +1,6 @@
 # ServerAdmin
 
-ServerAdmin is a full-screen, in-game administration centre for Garry's Mod (v3.2.1). It uses native Derma UI and server-authoritative networking; it is not a remote web panel and it does not require ULX.
+ServerAdmin is a full-screen, in-game administration centre for Garry's Mod (v3.2.2). It uses native Derma UI and server-authoritative networking; it is not a remote web panel and it does not require ULX.
 
 ## Installation
 
@@ -43,8 +43,8 @@ ServerAdmin is a full-screen, in-game administration centre for Garry's Mod (v3.
 - Clean up map entities, with a confirmation prompt.
 - Enable/disable build lockdown for non-admin players.
 - Set or clear the server connection password directly from a dedicated **Server access password** panel in **Server controls**; confirmation dialogs explain the effect before applying changes.
-- Edit a fixed allow-list of server variables: gravity, password, voice/all-talk, LAN/friendly-fire flags, Sandbox permissions and common Sandbox entity limits.
-- The current password is never revealed to the client; only whether one is set is shown. Password input clears after submission, and an empty password makes the server public again.
+- Edit a fixed allow-list of server variables: gravity, password, voice/all-talk, LAN/friendly-fire flags, Sandbox permissions and common Sandbox entity limits. Server-side definitions may explicitly enable the write-only fallback (`allowWriteWhenUnavailable`) for engine variables that can be set but cannot be queried.
+- The password itself is never read or sent to the client. Because the engine can hide `sv_password` from `GetConVar`, the panel supports writing it through the server console command; when the initial state is hidden, the UI says so instead of falsely reporting that no password is set. After setting/clearing it in ServerAdmin, the panel shows the last applied state.
 
 ### Audit and persistence
 - SQLite tables store ServerAdmin actions, bans and warnings.
