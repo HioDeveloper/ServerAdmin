@@ -571,6 +571,7 @@ local function buildPanel()
     groupImmunityEntry:SetPos(151, 7); groupImmunityEntry:SetSize(70, 32); groupImmunityEntry:SetText("25")
     local parentCombo = vgui.Create("DComboBox", groupBar)
     parentCombo:SetPos(227, 7); parentCombo:SetSize(130, 32); parentCombo:SetValue("Parent: user")
+    parentCombo.OnSelect = function(_, _, value, data) parentCombo.serveradminSelected = data or value end
     local createGroupButton = button(groupBar, "Create group", C.green, function()
         local name = string.Trim(groupNameEntry:GetValue() or "")
         local immunity = tonumber(groupImmunityEntry:GetValue() or "")
@@ -643,7 +644,10 @@ local function buildPanel()
     groupList:AddColumn("Immunity"):SetFixedWidth(80)
     groupList:AddColumn("Parent")
     styleListView(groupList)
-    groupList.OnRowSelected = function(_, _, row) selectedGroupName = row.serveradminGroupName end
+    groupList.OnRowSelected = function(_, _, row)
+        selectedGroupName = row.serveradminGroupName
+        if IsValid(accessGroupCombo) then accessGroupCombo:SetValue(selectedGroupName or "Select group") end
+    end
     local connectedList = vgui.Create("DListView", listsPanel)
     connectedList:Dock(FILL)
     connectedList:AddColumn("Connected player"):SetFixedWidth(180)
