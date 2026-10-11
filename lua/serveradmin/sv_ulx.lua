@@ -1017,7 +1017,11 @@ register("adduser", 100, "Assign a player or SteamID64 to a group. Usage: ulx ad
     store.users[sid64] = group
     saveStore()
     for _, target in ipairs(player.GetAll()) do
-        if keyFor(target) == sid64 then target:SetNWString("ServerAdminULXGroup", group) end
+        if keyFor(target) == sid64 then
+            target:SetNWString("ServerAdminULXGroup", group)
+            target:SetNWBool("ServerAdminULXIsAdmin", U.IsAdmin(target))
+            target:SetNWBool("ServerAdminULXIsSuperAdmin", U.IsSuperAdmin(target))
+        end
     end
     logAction(ply, "adduser", display .. " [" .. sid64 .. "]", group)
     tell(ply, "Assigned " .. display .. " to group '" .. group .. "'.")
@@ -1218,7 +1222,11 @@ net.Receive(ULX_NET, function(_, ply)
         store.users[sid64] = name
         saveStore()
         for _, target in ipairs(player.GetAll()) do
-            if keyFor(target) == sid64 then target:SetNWString("ServerAdminULXGroup", name) end
+            if keyFor(target) == sid64 then
+                target:SetNWString("ServerAdminULXGroup", name)
+                target:SetNWBool("ServerAdminULXIsAdmin", U.IsAdmin(target))
+                target:SetNWBool("ServerAdminULXIsSuperAdmin", U.IsSuperAdmin(target))
+            end
         end
         logAction(ply, "adduser", sid64, name .. " (group editor)")
         sendGroupSnapshot(ply)
@@ -1327,7 +1335,11 @@ end)
 
 hook.Add("PlayerInitialSpawn", "ServerAdminULX_SetGroupNW", function(ply)
     timer.Simple(1, function()
-        if IsValid(ply) then ply:SetNWString("ServerAdminULXGroup", getGroupName(ply)) end
+        if IsValid(ply) then
+            ply:SetNWString("ServerAdminULXGroup", getGroupName(ply))
+            ply:SetNWBool("ServerAdminULXIsAdmin", U.IsAdmin(ply))
+            ply:SetNWBool("ServerAdminULXIsSuperAdmin", U.IsSuperAdmin(ply))
+        end
     end)
 end)
 
