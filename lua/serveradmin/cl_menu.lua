@@ -622,10 +622,10 @@ local function buildPanel()
     local userBar = vgui.Create("DPanel", groupsPage)
     userBar:Dock(TOP); userBar:SetTall(44); userBar:DockMargin(0, 0, 0, 6); userBar.Paint = nil
     local assignGroupCombo = vgui.Create("DComboBox", userBar)
-    assignGroupCombo:SetPos(0, 6); assignGroupCombo:SetSize(230, 32); assignGroupCombo:SetValue("Assign group")
+    assignGroupCombo:SetPos(0, 6); assignGroupCombo:SetSize(150, 32); assignGroupCombo:SetValue("Assign group")
     assignGroupCombo.OnSelect = function(_, _, value, data) selectedAssignGroup = data or value end
     local userIdentityEntry = vgui.Create("DTextEntry", userBar)
-    userIdentityEntry:SetPos(0, 6); userIdentityEntry:SetSize(230, 32)
+    userIdentityEntry:SetPos(158, 6); userIdentityEntry:SetSize(220, 32)
     userIdentityEntry:SetPlaceholderText("Offline SteamID / SteamID64")
     local assignButton = button(userBar, "Assign group", C.blue, function()
         local identity = string.Trim(userIdentityEntry:GetValue() or "")
@@ -639,7 +639,7 @@ local function buildPanel()
             net.WriteString(selectedAssignGroup or "user")
         end)
     end, 32)
-    assignButton:SetPos(240, 6); assignButton:SetSize(155, 32)
+    assignButton:SetPos(388, 6); assignButton:SetSize(220, 32)
 
     local accessBar = vgui.Create("DPanel", groupsPage)
     accessBar:Dock(TOP); accessBar:SetTall(44); accessBar:DockMargin(0, 0, 0, 8); accessBar.Paint = nil
