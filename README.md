@@ -1,6 +1,6 @@
 # ServerAdmin
 
-ServerAdmin is a full-screen, in-game administration centre for Garry's Mod. It uses native Derma UI and server-authoritative networking; it is not a remote web panel and it does not require ULX.
+ServerAdmin is a full-screen, in-game administration centre for Garry's Mod (v3.1.0). It uses native Derma UI and server-authoritative networking; it is not a remote web panel and it does not require ULX.
 
 ## Installation
 
@@ -50,13 +50,13 @@ ServerAdmin is a full-screen, in-game administration centre for Garry's Mod. It 
 - The audit log records the administrator, action, target and details.
 - Superadmins can clear the ServerAdmin audit log from the in-game panel; this does not delete ban or warning records.
 - Timed ServerAdmin ban records are marked expired when their expiry time has passed.
-- A built-in ULX-compatible command layer provides console commands (`ulx <command>`) and chat aliases (`!command` or `/command`), persistent custom user groups, immunity, group inheritance, per-group/per-user command allow/deny overrides, voting, admin chat, and a separate command log. It does not embed the upstream ULX/ULib packages.
+- A built-in ULX-compatible command layer provides console commands (`ulx <command>`) and chat aliases (`!command` or `/command`), persistent custom user groups, immunity, group inheritance, per-group/per-user command allow/deny overrides, voting, admin chat, and a separate command log. The panel now includes a dedicated **ULX groups & access** page for group creation/deletion, connected-player group assignment, and command permission overrides. It does not embed the upstream ULX/ULib packages.
 
 ### ULX-compatible command layer
 
 Use `ulx help` in server/client console or `!help` in chat to list commands. Quoted player names are supported in chat, and player selectors include `@all`, `@admins`, `@bots`, `@random` and `@me`.
 
-Included command families: kick/ban/banid/unban/banlist/warn, slay/slap/freeze, bring/goto/send/return, jail/unjail, heal/hp/armor/respawn, god, cloak/blind, ignite/extinguish, voice mute and chat gag, speed/jump restoration, weapon giving, map/hostname/gravity/timescale/cleanup, announcements/private/admin chat, yes/no polls, votemap/votekick, log viewing, group creation/removal, user group assignment, immunity, and per-user/per-group access overrides. The `menu` command opens the existing ServerAdmin panel.
+Included command families: kick/ban/banid/unban/banlist/warn, slay/slap/freeze/freeze-all, bring/goto/send/return, jail/unjail, heal/hp/armor/respawn, god, cloak/blind, ignite/extinguish, voice mute and chat gag/gimp, noclip, speed/jump restoration, weapon/ammo giving, map/hostname/gravity/timescale/cleanup, announcements/private/admin/centre-screen chat, yes/no polls, votemap/votekick/voteban, log viewing, group creation/removal, user group assignment, immunity, and per-user/per-group access overrides. The `menu` command opens the existing ServerAdmin panel.
 
 Group data is saved in `data/serveradmin/ulx_access.json`; command logs are saved in `data/serveradmin/ulx.log`. Existing built-in ServerAdmin ban and warning records are shared with this command layer. This is an original ULX-compatible implementation, not the upstream ULX package, so it should not be described as binary/API-compatible with ULX extensions requiring ULib.
 
