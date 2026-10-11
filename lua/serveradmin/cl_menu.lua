@@ -593,6 +593,32 @@ local function buildPanel()
     end, 32)
     deleteGroupButton:SetPos(482, 7); deleteGroupButton:SetSize(130, 32)
 
+    local editGroupBar = vgui.Create("DPanel", groupsPage)
+    editGroupBar:Dock(TOP); editGroupBar:SetTall(42); editGroupBar:DockMargin(0, 0, 0, 6); editGroupBar.Paint = nil
+    local editGroupLabel = label(editGroupBar, "Edit selected", "DermaDefaultBold", C.muted)
+    editGroupLabel:SetPos(0, 13); editGroupLabel:SetSize(100, 18)
+    local editGroupImmunityEntry = vgui.Create("DTextEntry", editGroupBar)
+    editGroupImmunityEntry:SetPos(105, 5); editGroupImmunityEntry:SetSize(70, 32)
+    editGroupImmunityEntry:SetPlaceholderText("Immunity")
+    local editGroupParentCombo = vgui.Create("DComboBox", editGroupBar)
+    editGroupParentCombo:SetPos(182, 5); editGroupParentCombo:SetSize(170, 32); editGroupParentCombo:SetValue("Parent group")
+    editGroupParentCombo.OnSelect = function(_, _, value, data) editGroupParentCombo.serveradminSelected = data or value end
+    local saveGroupButton = button(editGroupBar, "Save group settings", C.cyan, function()
+        if not selectedGroupName then notify("Select a group first.", false); return end
+        local immunity = tonumber(editGroupImmunityEntry:GetValue() or "")
+        if not immunity or immunity < 0 or immunity > 99 then
+            notify("Group immunity must be from 0 to 99.", false)
+            return
+        end
+        local parent = tostring(editGroupParentCombo.serveradminSelected or "")
+        requestULX("update_group", function()
+            net.WriteString(selectedGroupName)
+            net.WriteUInt(math.floor(immunity), 10)
+            net.WriteString(parent)
+        end)
+    end, 32)
+    saveGroupButton:SetPos(360, 5); saveGroupButton:SetSize(170, 32)
+
     local userBar = vgui.Create("DPanel", groupsPage)
     userBar:Dock(TOP); userBar:SetTall(44); userBar:DockMargin(0, 0, 0, 6); userBar.Paint = nil
     local assignGroupCombo = vgui.Create("DComboBox", userBar)
@@ -647,6 +673,15 @@ local function buildPanel()
     groupList.OnRowSelected = function(_, _, row)
         selectedGroupName = row.serveradminGroupName
         if IsValid(accessGroupCombo) then accessGroupCombo:SetValue(selectedGroupName or "Select group") end
+        if IsValid(editGroupImmunityEntry) then editGroupImmunityEntry:SetText(tostring(row.serveradminGroupImmunity or 0)) end
+        if IsValid(editGroupParentCombo) then
+            local parent = tostring(row.serveradminGroupParent or "")
+            editGroupParentCombo.serveradminSelected = parent
+            editGroupParentCombo:SetValue(parent ~= "" and parent or "none")
+        end
+        local isBuiltIn = selectedGroupName == "user" or selectedGroupName == "operator" or
+            selectedGroupName == "admin" or selectedGroupName == "superadmin"
+        if IsValid(saveGroupButton) then saveGroupButton:SetEnabled(not isBuiltIn) end
     end
     local connectedList = vgui.Create("DListView", listsPanel)
     connectedList:Dock(FILL)
@@ -661,13 +696,18 @@ local function buildPanel()
         groupList:Clear()
         connectedList:Clear()
         parentCombo:Clear()
+        editGroupParentCombo:Clear()
+        editGroupParentCombo:AddChoice("none", "", true)
         assignGroupCombo:Clear()
         accessGroupCombo:Clear()
         accessCommandCombo:Clear()
         for _, group in ipairs(ulxState.groups or {}) do
             local line = groupList:AddLine(group.name, tostring(group.immunity), group.parent ~= "" and group.parent or "—")
             line.serveradminGroupName = group.name
+            line.serveradminGroupImmunity = tonumber(group.immunity) or 0
+            line.serveradminGroupParent = tostring(group.parent or "")
             parentCombo:AddChoice(group.name, group.name, group.name == "user")
+            editGroupParentCombo:AddChoice(group.name, group.name, group.name == (selectedGroupName or "user"))
             assignGroupCombo:AddChoice(group.name, group.name, group.name == "user")
             accessGroupCombo:AddChoice(group.name, group.name, group.name == (selectedGroupName or "user"))
         end
@@ -675,6 +715,18 @@ local function buildPanel()
         parentCombo.serveradminSelected = "user"
         for _, group in ipairs(ulxState.groups or {}) do
             if group.name == "user" then parentCombo:ChooseOption("user"); break end
+        end
+        local selectedGroup
+        for _, group in ipairs(ulxState.groups or {}) do
+            if group.name == selectedGroupName then selectedGroup = group; break end
+        end
+        if selectedGroup then
+            editGroupImmunityEntry:SetText(tostring(selectedGroup.immunity or 0))
+            editGroupParentCombo.serveradminSelected = tostring(selectedGroup.parent or "")
+            editGroupParentCombo:SetValue(selectedGroup.parent ~= "" and selectedGroup.parent or "none")
+            local isBuiltIn = selectedGroup.name == "user" or selectedGroup.name == "operator" or
+                selectedGroup.name == "admin" or selectedGroup.name == "superadmin"
+            saveGroupButton:SetEnabled(not isBuiltIn)
         end
         for _, command in ipairs(ulxState.commands or {}) do
             accessCommandCombo:AddChoice(command.name, command.name, command.name == "help")
