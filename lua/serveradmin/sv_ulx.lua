@@ -93,6 +93,7 @@ loadStore()
 
 local COMMANDS, ALIASES = {}, {}
 local CHAT_MUTES, CHAT_GAGS, FROZEN, BLINDED, CLOAKED = {}, {}, {}, {}, {}
+local GIMPed, NOCLIPPED = {}, {}
 local ORIGINAL_MOVEMENT, ORIGINAL_JAIL_POS = {}, {}
 local currentVote, voteSerial = nil, 0
 
@@ -758,6 +759,106 @@ register("ungag", 50, "Restore chat messages for target(s). Usage: ulx ungag <pl
     if count > 0 then tell(ply, "Ungagged " .. count .. " player(s).") end
 end)
 
+register("gimp", 50, "Replace target chat with a harmless preset message. Usage: ulx gimp <player>", function(ply, args)
+    local count = eachTarget(ply, args[1], function(target)
+        GIMPed[target] = true
+        logAction(ply, "gimp", target:Nick(), "")
+    end)
+    if count > 0 then tell(ply, "Gimped " .. count .. " player(s).") end
+end)
+
+register("ungimp", 50, "Restore target chat. Usage: ulx ungimp <player>", function(ply, args)
+    local count = eachTarget(ply, args[1], function(target)
+        GIMPed[target] = nil
+        logAction(ply, "ungimp", target:Nick(), "")
+    end)
+    if count > 0 then tell(ply, "Ungimped " .. count .. " player(s).") end
+end)
+
+register("gagall", 100, "Block chat messages from all players below your immunity.", function(ply)
+    local count = eachTarget(ply, "@all", function(target)
+        if target == ply then return end
+        CHAT_GAGS[target] = true
+        logAction(ply, "gag", target:Nick(), "gagall")
+    end)
+    tell(ply, "Gag-all processed " .. count .. " player(s).")
+end)
+
+register("ungagall", 100, "Restore chat messages for all players below your immunity.", function(ply)
+    local count = eachTarget(ply, "@all", function(target) CHAT_GAGS[target] = nil end)
+    tell(ply, "Ungag-all processed " .. count .. " player(s).")
+end)
+
+register("muteall", 100, "Mute voice chat for all players below your immunity.", function(ply)
+    local count = eachTarget(ply, "@all", function(target)
+        if target == ply then return end
+        CHAT_MUTES[target] = true
+        if target.SetMuted then target:SetMuted(true) end
+        logAction(ply, "mute", target:Nick(), "muteall")
+    end)
+    tell(ply, "Mute-all processed " .. count .. " player(s).")
+end)
+
+register("unmuteall", 100, "Restore voice chat for all players below your immunity.", function(ply)
+    local count = eachTarget(ply, "@all", function(target)
+        CHAT_MUTES[target] = nil
+        if target.SetMuted then target:SetMuted(false) end
+    end)
+    tell(ply, "Unmute-all processed " .. count .. " player(s).")
+end)
+
+register("noclip", 75, "Enable noclip for target(s). Usage: ulx noclip <player>", function(ply, args)
+    local count = eachTarget(ply, args[1], function(target)
+        if not NOCLIPPED[target] then NOCLIPPED[target] = target:GetMoveType() end
+        target:SetMoveType(MOVETYPE_NOCLIP)
+        logAction(ply, "noclip", target:Nick(), "enabled")
+    end)
+    if count > 0 then tell(ply, "Noclip enabled for " .. count .. " player(s).") end
+end)
+
+register("unnoclip", 75, "Disable noclip for target(s). Usage: ulx unnoclip <player>", function(ply, args)
+    local count = eachTarget(ply, args[1], function(target)
+        target:SetMoveType(NOCLIPPED[target] or MOVETYPE_WALK)
+        NOCLIPPED[target] = nil
+        logAction(ply, "noclip", target:Nick(), "disabled")
+    end)
+    if count > 0 then tell(ply, "Noclip disabled for " .. count .. " player(s).") end
+end)
+
+register("ammo", 50, "Give reserve ammo for a player's active weapon. Usage: ulx ammo <player> [amount]", function(ply, args)
+    local amount = math.floor(parseNumber(args[2], 1, 1000, 120))
+    local count = eachTarget(ply, args[1], function(target)
+        local weapon = target:GetActiveWeapon()
+        if not IsValid(weapon) then error("Player has no active weapon.") end
+        local ammoType = weapon:GetPrimaryAmmoType()
+        if not ammoType or ammoType < 0 then error("Active weapon has no primary ammo type.") end
+        target:GiveAmmo(amount, ammoType, true)
+        logAction(ply, "ammo", target:Nick(), tostring(amount))
+    end)
+    if count > 0 then tell(ply, "Ammo supplied to " .. count .. " player(s).") end
+end)
+
+register("csay", 50, "Show a centre-screen announcement. Usage: ulx csay <message>", function(ply, args)
+    local message = clean(rest(args, 1), 160)
+    if message == "" then tell(ply, "Usage: ulx csay <message>"); return end
+    PrintMessage(HUD_PRINTCENTER, message)
+    logAction(ply, "csay", "-", message)
+end)
+
+register("ssay", 50, "Broadcast a server message. Usage: ulx ssay <message>", function(ply, args)
+    local message = clean(rest(args, 1), 180)
+    if message == "" then tell(ply, "Usage: ulx ssay <message>"); return end
+    tellAll(message)
+    logAction(ply, "ssay", "-", message)
+end)
+
+register("maprestart", 100, "Restart the current map. Usage: ulx maprestart", function(ply)
+    local currentMap = game.GetMap()
+    logAction(ply, "maprestart", "-", currentMap)
+    tellAll("Restarting map " .. currentMap .. ".")
+    timer.Simple(1, function() RunConsoleCommand("changelevel", currentMap) end)
+end, {"restartmap"})
+
 register("freezeall", 100, "Freeze all players below your immunity.", function(ply)
     local count = eachTarget(ply, "@all", function(target)
         if target == ply then return end
@@ -934,6 +1035,22 @@ local function startActionVote(actor, kind, target, question)
                 timer.Simple(1, function() RunConsoleCommand("changelevel", mapName) end)
                 logAction(nil, "votemap", "-", mapName)
             end
+        elseif passed and vote.kind == "voteban" and IsValid(vote.target) then
+            local target = vote.target
+            if not target:IsBot() and validSteamID(target:SteamID()) then
+                local sid, sid64, name = target:SteamID(), target:SteamID64(), target:Nick()
+                local minutes = math.Clamp(math.floor(tonumber(vote.minutes) or 0), 0, 525600)
+                local reason = clean(vote.reason or "Removed by player vote", 160)
+                local now = os.time()
+                local expires = minutes > 0 and (now + minutes * 60) or 0
+                sql.Query("INSERT INTO serveradmin_bans (steamid, steamid64, name, reason, actor, created, expires, active) VALUES (" ..
+                    sql.SQLStr(sid) .. ", " .. sql.SQLStr(sid64) .. ", " .. sql.SQLStr(clean(name, 64)) .. ", " ..
+                    sql.SQLStr(reason) .. ", 'Player vote', " .. tostring(now) .. ", " .. tostring(expires) .. ", 1)")
+                target:Ban(minutes, false)
+                timer.Simple(0, function() RunConsoleCommand("writeid") end)
+                target:Kick(reason)
+                logAction(nil, "voteban", name .. " [" .. sid .. "]", tostring(minutes) .. " minute(s): " .. reason)
+            end
         end
         currentVote = nil
     end)
@@ -954,6 +1071,20 @@ register("votekick", 50, "Start a kick vote. Usage: ulx votekick <player> [reaso
     if not target then return end
     local reason = clean(rest(args, 2), 120)
     startActionVote(ply, "votekick", target, "Kick " .. target:Nick() .. (reason ~= "" and " (" .. reason .. ")" or "") .. "?")
+end)
+
+register("voteban", 75, "Start a ban vote. Usage: ulx voteban <player> [minutes] [reason]", function(ply, args)
+    local target = singleTarget(ply, args)
+    if not target then return end
+    local minutes = minutesArg(args, 2) or 0
+    local reason = clean(rest(args, minutesArg(args, 2) and 3 or 2), 160)
+    startActionVote(ply, "voteban", target, "Ban " .. target:Nick() ..
+        (minutes == 0 and " permanently" or " for " .. minutes .. " minute(s)") ..
+        (reason ~= "" and " (" .. reason .. ")" or "") .. "?")
+    if currentVote and currentVote.kind == "voteban" then
+        currentVote.minutes = minutes
+        currentVote.reason = reason ~= "" and reason or "Removed by player vote"
+    end
 end)
 
 register("yes", 0, "Vote yes in the current poll.", function(ply)
@@ -1320,6 +1451,7 @@ end)
 hook.Add("PlayerSay", "ServerAdminULX_ChatCommands", function(ply, text)
     if not IsValid(ply) or not ply:IsPlayer() then return end
     if CHAT_GAGS[ply] then return "" end
+    if GIMPed[ply] then return "I have been gagged by an administrator." end
     if string.sub(text or "", 1, 1) == "@" and string.sub(text, 1, 2) ~= "@@" then
         local message = clean(string.sub(text, 2), 180)
         if message == "" then return "" end
@@ -1350,6 +1482,7 @@ end)
 
 hook.Add("PlayerDisconnected", "ServerAdminULX_ClearState", function(ply)
     CHAT_MUTES[ply], CHAT_GAGS[ply], FROZEN[ply], BLINDED[ply], CLOAKED[ply] = nil, nil, nil, nil, nil
+    GIMPed[ply], NOCLIPPED[ply] = nil, nil
     ORIGINAL_MOVEMENT[ply], ORIGINAL_JAIL_POS[ply] = nil, nil
     if currentVote then
         local id = keyFor(ply)
