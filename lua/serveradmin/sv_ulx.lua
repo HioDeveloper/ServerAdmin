@@ -1348,7 +1348,7 @@ register("rcon", 100, "Run a server console command. Usage: ulx rcon <command> [
 end)
 
 register("lua", 100, "Execute Lua on the server. Usage: ulx lua <code>", function(ply, args)
-    local code = string.Trim(string.gsub(tostring(rest(args, 1) or ""), "[\\r\\n]", " "))
+    local code = string.Trim(string.gsub(tostring(rest(args, 1) or ""), "[\r\n]", " "))
     code = string.sub(code, 1, 4000)
     if code == "" then tell(ply, "Usage: ulx lua <code>"); return end
     logAction(ply, "lua", "-", string.sub(code, 1, 180))
